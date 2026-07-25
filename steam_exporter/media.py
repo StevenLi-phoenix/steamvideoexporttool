@@ -184,6 +184,24 @@ def _write_concat_list(files: list[Path]) -> Path:
     return list_path
 
 
+def extract_first_frame(files: list[Path], destination: Path) -> Path:
+    """Extract a thumbnail without touching the source files or re-encoding the export."""
+    ffmpeg = find_executable("ffmpeg")
+    if not ffmpeg:
+        raise ConversionError("FFmpeg was not found, so a preview cannot be generated.")
+    concat_list = _write_concat_list(files)
+    try:
+        command = [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
+                   "-i", str(concat_list), "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(destination)]
+        result = subprocess.run(command, capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        if result.returncode != 0 or not destination.exists():
+            raise ConversionError("FFmpeg could not create a preview for this recording.")
+        return destination
+    finally:
+        concat_list.unlink(missing_ok=True)
+
+
 def _read_duration(ffprobe: Path | None, concat_list: Path) -> float | None:
     if not ffprobe:
         return None
@@ -254,7 +272,13 @@ class SteamExporter:
                 errors.append(f"The output folder could not be created: {exc}")
         if output.exists() and not os.access(output, os.W_OK):
             errors.append("The output folder is not writable.")
-        total = sum(path.stat().st_size for path in files) if files else 0
+        if len(files) > 10_000:
+            sample = files[: min(1_000, len(files))]
+            sample_total = sum(path.stat().st_size for path in sample)
+            total = int(sample_total / len(sample) * len(files)) if sample else 0
+            warnings.append(f"Input size is estimated from {len(sample):,} sampled chunks because this root contains {len(files):,} files.")
+        else:
+            total = sum(path.stat().st_size for path in files) if files else 0
         free = shutil.disk_usage(output).free if output.exists() else 0
         required = max(512 * 1024**2, int(total * 1.25))
         if output.exists() and free < required:

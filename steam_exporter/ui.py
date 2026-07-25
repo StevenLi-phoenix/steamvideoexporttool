@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit, QProgressBar, QPushButton,
-    QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
+    QProgressBar, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .media import DEFAULT_PATTERN, format_bytes
@@ -24,6 +25,7 @@ class App(QMainWindow):
         self.setMinimumSize(820, 650)
         self.busy = False
         self.thread: TaskThread | None = None
+        self.preview_thread: TaskThread | None = None
         self.source_edit = QLineEdit()
         self.output_edit = QLineEdit()
         self.format_combo = QComboBox()
@@ -42,8 +44,15 @@ class App(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
+        self.recording_list = QListWidget()
+        self.recording_list.setMinimumHeight(150)
+        self.preview_label = QLabel("Select a recording and click Preview first frame")
+        self.preview_label.setAlignment(Qt.AlignCenter)
+        self.preview_label.setMinimumSize(320, 180)
+        self.preview_label.setObjectName("preview")
         self.preflight_button = QPushButton("Run preflight checks")
         self.convert_button = QPushButton("Convert")
+        self.preview_button = QPushButton("Preview first frame")
         self._build_ui()
         self._apply_style()
 
@@ -89,6 +98,27 @@ class App(QMainWindow):
         grid.setColumnStretch(1, 1)
         grid.setColumnStretch(3, 1)
         root.addWidget(settings)
+
+        recordings = QGroupBox("Recordings to export")
+        recording_layout = QVBoxLayout(recordings)
+        recording_layout.setContentsMargins(12, 12, 12, 12)
+        recording_layout.addWidget(self.recording_list)
+        recording_actions = QHBoxLayout()
+        select_all = QPushButton("Select all")
+        clear_all = QPushButton("Clear all")
+        select_all.clicked.connect(lambda: self._set_all_recordings(Qt.Checked))
+        clear_all.clicked.connect(lambda: self._set_all_recordings(Qt.Unchecked))
+        self.preview_button.clicked.connect(self.preview_selected)
+        recording_actions.addWidget(select_all)
+        recording_actions.addWidget(clear_all)
+        recording_actions.addWidget(self.preview_button)
+        recording_actions.addStretch()
+        recording_layout.addLayout(recording_actions)
+        preview_row = QHBoxLayout()
+        preview_row.addWidget(self.preview_label)
+        preview_row.addStretch()
+        recording_layout.addLayout(preview_row)
+        root.addWidget(recordings)
         detected = QFrame()
         detected_layout = QHBoxLayout(detected)
         detected_layout.setContentsMargins(4, 0, 4, 0)
@@ -140,6 +170,10 @@ class App(QMainWindow):
             QProgressBar { height: 8px; border: 0; border-radius: 4px; background: #e5e7eb; text-align: center; }
             QProgressBar::chunk { border-radius: 4px; background: #2563eb; }
             QPlainTextEdit { font-family: Consolas; font-size: 9pt; }
+            QLabel#preview { background: #101828; color: #98a2b3; border-radius: 8px; padding: 8px; }
+            QListWidget { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 7px; padding: 4px; }
+            QListWidget::item { padding: 8px; border-radius: 5px; }
+            QListWidget::item:selected { background: #e6efff; color: #14213d; }
         """)
 
     def _choose_source(self):
@@ -166,6 +200,57 @@ class App(QMainWindow):
     def _clear_log(self):
         self.log_edit.clear()
         self.progress_bar.setValue(0)
+
+    def _set_all_recordings(self, state):
+        for index in range(self.recording_list.count()):
+            self.recording_list.item(index).setCheckState(state)
+
+    def _populate_recordings(self, result):
+        self.recording_list.clear()
+        for recording in result.recordings:
+            item = QListWidgetItem(f"{recording.folder.name}   |   {recording.game_name}   |   {len(recording.files):,} chunks")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked)
+            item.setData(Qt.UserRole, recording)
+            self.recording_list.addItem(item)
+        if self.recording_list.count():
+            self.recording_list.setCurrentRow(0)
+
+    def _selected_folders(self):
+        selected = []
+        for index in range(self.recording_list.count()):
+            item = self.recording_list.item(index)
+            if item.checkState() == Qt.Checked:
+                selected.append(str(item.data(Qt.UserRole).folder))
+        return selected
+
+    def preview_selected(self):
+        item = self.recording_list.currentItem()
+        if not item or not item.data(Qt.UserRole):
+            QMessageBox.information(self, APP_TITLE, "Select a recording first.")
+            return
+        recording = item.data(Qt.UserRole)
+        self.preview_button.setEnabled(False)
+        self.preview_label.setText("Creating preview...")
+        thread = TaskThread("preview", (recording.files,), self)
+        self.preview_thread = thread
+        thread.preview_signal.connect(self._show_preview)
+        thread.error_signal.connect(self._thread_error)
+        thread.finished.connect(lambda: self.preview_button.setEnabled(True))
+        thread.finished.connect(thread.deleteLater)
+        thread.start()
+
+    def _show_preview(self, path):
+        pixmap = QPixmap(path)
+        if pixmap.isNull():
+            self.preview_label.setText("Preview could not be loaded")
+        else:
+            self.preview_label.setPixmap(pixmap)
+            self.preview_label.setScaledContents(False)
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _connect_thread(self, thread):
         self.thread = thread
@@ -198,6 +283,7 @@ class App(QMainWindow):
 
     def _show_preflight(self, result):
         self.game_value.setText(result.game_name)
+        self._populate_recordings(result)
         self._log("--- PREFLIGHT ---")
         self._log(f"Game name: {result.game_name}")
         self._log(f"Recordings: {len(result.recordings)} | Files: {len(result.files)} | Input size: {format_bytes(result.total_bytes)} | Free space: {format_bytes(result.free_bytes)}")
@@ -222,5 +308,10 @@ class App(QMainWindow):
         self._clear_log()
         self.status_value.setText("Running lossless remux...")
         self.progress_bar.setRange(0, 100)
-        args = (self.source_edit.text(), self.output_edit.text(), self.format_combo.currentText(), self._limit_bytes(), self.pattern_edit.text())
+        selected = self._selected_folders()
+        if not selected:
+            self._set_busy(False)
+            QMessageBox.information(self, APP_TITLE, "Select at least one recording folder to export.")
+            return
+        args = (self.source_edit.text(), self.output_edit.text(), self.format_combo.currentText(), self._limit_bytes(), self.pattern_edit.text(), selected)
         self._connect_thread(TaskThread("convert", args, self))
