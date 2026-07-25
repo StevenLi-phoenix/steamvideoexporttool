@@ -98,7 +98,10 @@ def _steam_roots() -> list[Path]:
 
 
 def resolve_game_name(source: Path) -> str:
-    for metadata in sorted(source.rglob("*.json"))[:50]:
+    metadata_files = list(source.glob("*.json")) + list(source.glob("*.JSON"))
+    if source.parent != source:
+        metadata_files += list(source.parent.glob("*.json")) + list(source.parent.glob("*.JSON"))
+    for metadata in metadata_files[:50]:
         try:
             data = json.loads(metadata.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError, UnicodeError):
