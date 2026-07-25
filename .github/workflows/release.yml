@@ -16,8 +16,16 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Install FFmpeg
-        run: winget install --id Gyan.FFmpeg --exact --accept-package-agreements --accept-source-agreements
+      - name: Download FFmpeg bundle
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "ffmpeg"
+          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $archive
+          Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot
+          $bin = (Get-ChildItem $extractRoot -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
+          Copy-Item (Join-Path $bin "ffmpeg.exe") .\ffmpeg.exe
+          Copy-Item (Join-Path $bin "ffprobe.exe") .\ffprobe.exe
       - name: Build standalone bundle
         run: powershell -ExecutionPolicy Bypass -File .\build.ps1
       - name: Package release files
