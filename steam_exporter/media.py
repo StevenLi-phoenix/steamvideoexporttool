@@ -7,6 +7,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
+import urllib.request
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +17,7 @@ from .models import ConversionError, PreflightResult, RecordingInput
 
 
 DEFAULT_PATTERN = "{game}_{date}_{time}_part{index}.{ext}"
+_GAME_NAME_CACHE: dict[str, str | None] = {}
 
 
 def format_bytes(value: int | float) -> str:
@@ -60,8 +63,11 @@ def find_executable(name: str, ffmpeg_path: Path | None = None) -> Path | None:
 
 
 def _parse_appid(text: str) -> str | None:
+    recording_match = re.search(r"(?:^|[\\/])bg_(\d{3,8})_\d{8}_\d{6}(?:$|[\\/])", text, re.IGNORECASE)
+    if recording_match:
+        return recording_match.group(1)
     matches = re.findall(r"(?:^|[\\/_-])(\d{3,8})(?:$|[\\/_-])", text)
-    return matches[-1] if matches else None
+    return matches[0] if matches else None
 
 
 def _parse_steam_name(text: str) -> str | None:
@@ -71,22 +77,28 @@ def _parse_steam_name(text: str) -> str | None:
     return bytes(match.group(1), "utf-8").decode("unicode_escape", errors="ignore")
 
 
+def _fetch_steam_game_name(appid: str) -> str | None:
+    if appid in _GAME_NAME_CACHE:
+        return _GAME_NAME_CACHE[appid]
+    try:
+        query = urllib.parse.urlencode({"appids": appid, "l": "english"})
+        with urllib.request.urlopen(f"https://store.steampowered.com/api/appdetails?{query}", timeout=3) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        value = payload.get(appid, {}).get("data", {}).get("name")
+        name = safe_name(value) if isinstance(value, str) and value.strip() else None
+    except (OSError, ValueError, json.JSONDecodeError):
+        name = None
+    _GAME_NAME_CACHE[appid] = name
+    return name
+
+
 def _steam_roots() -> list[Path]:
     roots: list[Path] = []
-    for hive_name, subkey in (
-        ("HKEY_CURRENT_USER", r"Software\Valve\Steam"),
-        ("HKEY_LOCAL_MACHINE", r"SOFTWARE\WOW6432Node\Valve\Steam"),
-    ):
-        try:
-            import winreg
-
-            with winreg.OpenKey(getattr(winreg, hive_name), subkey) as handle:
-                value, _ = winreg.QueryValueEx(handle, "SteamPath")
-                roots.append(Path(value))
-        except (OSError, ImportError):
-            pass
+    for base in (os.environ.get("PROGRAMFILES(X86)"), os.environ.get("PROGRAMFILES"), os.environ.get("LOCALAPPDATA")):
+        if base:
+            roots.append(Path(base) / "Steam")
     libraries = list(roots)
-    for root in libraries:
+    for root in list(roots):
         library_file = root / "steamapps" / "libraryfolders.vdf"
         try:
             text = library_file.read_text(encoding="utf-8", errors="ignore")
@@ -123,6 +135,9 @@ def resolve_game_name(source: Path) -> str:
                     continue
                 if name:
                     return safe_name(name)
+        online_name = _fetch_steam_game_name(appid)
+        if online_name:
+            return online_name
     else:
         try:
             local_manifests = list(source.glob("*.acf"))
@@ -145,7 +160,7 @@ def resolve_game_name(source: Path) -> str:
 def discover_m4s(source: Path) -> list[Path]:
     files: list[Path] = []
     for folder, _, names in os.walk(source):
-        files.extend(Path(folder) / name for name in names if name.lower().endswith(".m4s"))
+        files.extend(Path(folder) / name for name in names if name.lower().endswith(".m4s") and not name.lower().startswith("init-stream"))
     return files
 
 
@@ -184,30 +199,43 @@ def _write_concat_list(files: list[Path]) -> Path:
     return list_path
 
 
-def extract_first_frame(files: list[Path], destination: Path) -> Path:
+def extract_first_frame(files: list[Path], destination: Path, manifest: Path | None = None) -> Path:
     """Extract a thumbnail without touching the source files or re-encoding the export."""
     ffmpeg = find_executable("ffmpeg")
     if not ffmpeg:
         raise ConversionError("FFmpeg was not found, so a preview cannot be generated.")
-    concat_list = _write_concat_list(files)
+    concat_list = _write_concat_list(files) if manifest is None else None
     try:
-        command = [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y", "-f", "concat", "-safe", "0",
-                   "-i", str(concat_list), "-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(destination)]
+        command = [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y"]
+        if manifest:
+            command.extend(["-i", str(manifest)])
+        else:
+            command.extend(["-f", "concat", "-safe", "0", "-i", str(concat_list)])
+        command.extend(["-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(destination)])
         result = subprocess.run(command, capture_output=True, text=True,
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode != 0 or not destination.exists():
             raise ConversionError("FFmpeg could not create a preview for this recording.")
         return destination
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
     finally:
-        concat_list.unlink(missing_ok=True)
+        if concat_list:
+            concat_list.unlink(missing_ok=True)
 
 
-def _read_duration(ffprobe: Path | None, concat_list: Path) -> float | None:
+def _read_duration(ffprobe: Path | None, concat_list: Path | None = None, manifest: Path | None = None) -> float | None:
     if not ffprobe:
         return None
+    command = [str(ffprobe), "-v", "error"]
+    if manifest:
+        command.extend(["-i", str(manifest)])
+    else:
+        command.extend(["-f", "concat", "-safe", "0", "-i", str(concat_list)])
+    command.extend(["-show_entries", "format=duration", "-of", "default=nk=1:nw=1"])
     result = subprocess.run(
-        [str(ffprobe), "-v", "error", "-f", "concat", "-safe", "0", "-i", str(concat_list),
-         "-show_entries", "format=duration", "-of", "default=nk=1:nw=1"],
+        command,
         capture_output=True, text=True,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -287,7 +315,7 @@ class SteamExporter:
             warnings.append(f"Free space is tight ({format_bytes(free)}). A large conversion may need more headroom.")
         if ffmpeg and not ffprobe:
             warnings.append("ffprobe was not found; duration will be estimated and segment sizing may be less precise.")
-        recordings = [RecordingInput(folder, group, resolve_game_name(folder)) for folder, group in grouped]
+        recordings = [RecordingInput(folder, group, resolve_game_name(folder), folder / "session.mpd" if (folder / "session.mpd").exists() else None) for folder, group in grouped]
         game_name = recordings[0].game_name if recordings else "SteamRecording"
         return PreflightResult(errors, warnings, files, game_name, ffmpeg, ffprobe, total, free, recordings)
 
@@ -304,8 +332,8 @@ class SteamExporter:
             self.log(f"Target: {output_format.upper()}, lossless stream copy, max {format_bytes(limit_bytes)} per segment")
             extension = output_format.lower()
             for recording_number, recording in enumerate(result.recordings, start=1):
-                concat_list = _write_concat_list(recording.files)
-                duration = _read_duration(result.ffprobe, concat_list)
+                concat_list = _write_concat_list(recording.files) if recording.manifest is None else None
+                duration = _read_duration(result.ffprobe, concat_list, recording.manifest)
                 if not duration or duration <= 0:
                     duration = max(1800.0, sum(path.stat().st_size for path in recording.files) * 8 / 8_000_000)
                 estimated_bps = max(1_500_000, sum(path.stat().st_size for path in recording.files) * 8 / duration)
@@ -317,9 +345,13 @@ class SteamExporter:
                         if old.is_file():
                             old.unlink()
                     self.log(f"Remux pass {attempt + 1}/3 (about {segment_seconds / 60:.0f} minutes per segment)...")
-                    command = [str(result.ffmpeg), "-hide_banner", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list),
-                               "-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero", "-f", "segment",
-                               "-segment_time", f"{segment_seconds:.3f}", "-reset_timestamps", "1"]
+                    command = [str(result.ffmpeg), "-hide_banner", "-y"]
+                    if recording.manifest:
+                        command.extend(["-i", str(recording.manifest)])
+                    else:
+                        command.extend(["-f", "concat", "-safe", "0", "-i", str(concat_list)])
+                    command.extend(["-map", "0", "-c", "copy", "-avoid_negative_ts", "make_zero", "-f", "segment",
+                                    "-segment_time", f"{segment_seconds:.3f}", "-reset_timestamps", "1"])
                     if extension in {"mp4", "mov"}:
                         command.extend(["-segment_format", extension, "-segment_format_options", "movflags=+faststart"])
                     else:
@@ -352,8 +384,9 @@ class SteamExporter:
                     shutil.move(str(segment), str(destination))
                     self.log(f"Created {destination.name} ({format_bytes(destination.stat().st_size)})")
                     self.progress(((recording_number - 1) + index / len(segments)) / len(result.recordings))
-                concat_list.unlink(missing_ok=True)
-                concat_list = None
+                if concat_list:
+                    concat_list.unlink(missing_ok=True)
+                    concat_list = None
             self.log(f"Done: {len(result.recordings)} recording(s) written to {output}")
         finally:
             try:

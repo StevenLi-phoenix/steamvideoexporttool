@@ -1,6 +1,8 @@
 # Steam Video Exporter
 
-![Steam Video Exporter hero](assets/hero.png)
+<p align="center">
+  <img src="assets/app-screenshot.png" alt="Steam Video Exporter application window" width="960">
+</p>
 
 Standalone Windows GUI for losslessly remuxing a Steam Game Recording folder into MP4, MOV, or FLV. It accepts one recording folder or a Steam library root such as `D:\Videos\Steam`; library roots are grouped by each `bg_<appid>_<timestamp>` recording directory so unrelated sessions are never concatenated. The app uses the game name from nearby Steam metadata/app manifests instead of using the selected folder name.
 
@@ -13,6 +15,16 @@ Standalone Windows GUI for losslessly remuxing a Steam Game Recording folder int
 ```powershell
 uv run python .\steam_video_exporter.py
 ```
+
+## TDD pre-commit hook
+
+The repository uses the version-controlled `.githooks/pre-commit` hook to run the unit-test suite before each commit. Enable it once per clone:
+
+```powershell
+git config core.hooksPath .githooks
+```
+
+The hook also enforces an 80% minimum coverage threshold for the testable conversion core (`steam_exporter.media` and `steam_exporter.models`). The Qt UI and thread wiring are covered separately through integration checks.
 
 ## Package as a standalone EXE
 

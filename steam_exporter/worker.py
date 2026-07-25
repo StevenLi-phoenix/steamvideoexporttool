@@ -34,7 +34,7 @@ class TaskThread(QThread):
                 handle, name = tempfile.mkstemp(prefix="steam-preview-", suffix=".jpg")
                 os.close(handle)
                 target = Path(name)
-                self.preview_signal.emit(str(extract_first_frame(files, target)))
+                self.preview_signal.emit(str(extract_first_frame(files, target, self.args[1] if len(self.args) > 1 else None)))
                 return
             source, output, output_format, limit, pattern, selected_folders = self.args
             result = exporter.preflight(source, output)

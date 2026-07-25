@@ -11,6 +11,20 @@ dependencies = [
 build = [
     "pyinstaller>=6.0,<7",
 ]
+test = [
+    "coverage>=7.15.2",
+]
 
 [tool.uv]
 default-groups = ["build"]
+
+[tool.coverage.run]
+source = ["steam_exporter"]
+omit = [
+    "steam_exporter/ui.py",
+    "steam_exporter/worker.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true

@@ -9,6 +9,7 @@ class RecordingInput:
     folder: Path
     files: list[Path]
     game_name: str
+    manifest: Path | None = None
 
 
 @dataclass

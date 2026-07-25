@@ -6,7 +6,7 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QFileDialog, QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QRadioButton, QSpinBox, QVBoxLayout, QWidget,
+    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from .media import DEFAULT_PATTERN, format_bytes
@@ -21,8 +21,8 @@ class App(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle(APP_TITLE)
-        self.resize(980, 760)
-        self.setMinimumSize(820, 650)
+        self.resize(1100, 900)
+        self.setMinimumSize(900, 720)
         self.busy = False
         self.thread: TaskThread | None = None
         self.preview_thread: TaskThread | None = None
@@ -45,10 +45,10 @@ class App(QMainWindow):
         self.log_edit = QPlainTextEdit()
         self.log_edit.setReadOnly(True)
         self.recording_list = QListWidget()
-        self.recording_list.setMinimumHeight(150)
+        self.recording_list.setMinimumHeight(230)
         self.preview_label = QLabel("Select a recording and click Preview first frame")
         self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setMinimumSize(320, 180)
+        self.preview_label.setMinimumSize(380, 230)
         self.preview_label.setObjectName("preview")
         self.preflight_button = QPushButton("Run preflight checks")
         self.convert_button = QPushButton("Convert")
@@ -57,8 +57,12 @@ class App(QMainWindow):
         self._apply_style()
 
     def _build_ui(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
         body = QWidget()
-        self.setCentralWidget(body)
+        scroll.setWidget(body)
+        self.setCentralWidget(scroll)
         root = QVBoxLayout(body)
         root.setContentsMargins(28, 24, 28, 24)
         root.setSpacing(16)
@@ -75,6 +79,7 @@ class App(QMainWindow):
         self._path_row(path_grid, 1, "Output folder", self.output_edit, self._choose_output)
         root.addWidget(paths)
         settings = QGroupBox("Export settings")
+        settings.setMinimumHeight(150)
         grid = QGridLayout(settings)
         grid.setContentsMargins(16, 16, 16, 16)
         grid.setHorizontalSpacing(12)
@@ -100,9 +105,11 @@ class App(QMainWindow):
         root.addWidget(settings)
 
         recordings = QGroupBox("Recordings to export")
-        recording_layout = QVBoxLayout(recordings)
+        recordings.setMinimumHeight(300)
+        recording_layout = QHBoxLayout(recordings)
         recording_layout.setContentsMargins(12, 12, 12, 12)
-        recording_layout.addWidget(self.recording_list)
+        recording_list_column = QVBoxLayout()
+        recording_list_column.addWidget(self.recording_list, 1)
         recording_actions = QHBoxLayout()
         select_all = QPushButton("Select all")
         clear_all = QPushButton("Clear all")
@@ -113,11 +120,14 @@ class App(QMainWindow):
         recording_actions.addWidget(clear_all)
         recording_actions.addWidget(self.preview_button)
         recording_actions.addStretch()
-        recording_layout.addLayout(recording_actions)
-        preview_row = QHBoxLayout()
-        preview_row.addWidget(self.preview_label)
-        preview_row.addStretch()
-        recording_layout.addLayout(preview_row)
+        recording_list_column.addLayout(recording_actions)
+        preview_column = QVBoxLayout()
+        preview_caption = QLabel("First-frame preview")
+        preview_caption.setObjectName("fieldLabel")
+        preview_column.addWidget(preview_caption)
+        preview_column.addWidget(self.preview_label, 1)
+        recording_layout.addLayout(recording_list_column, 3)
+        recording_layout.addLayout(preview_column, 2)
         root.addWidget(recordings)
         detected = QFrame()
         detected_layout = QHBoxLayout(detected)
@@ -140,6 +150,7 @@ class App(QMainWindow):
         root.addLayout(actions)
         root.addWidget(self.progress_bar)
         log_group = QGroupBox("Activity")
+        log_group.setMinimumHeight(180)
         log_layout = QVBoxLayout(log_group)
         log_layout.setContentsMargins(12, 12, 12, 12)
         log_layout.addWidget(self.log_edit)
@@ -154,26 +165,26 @@ class App(QMainWindow):
 
     def _apply_style(self):
         self.setStyleSheet("""
-            QMainWindow, QWidget { background: #f6f8fb; color: #172033; font-family: 'Segoe UI'; font-size: 10pt; }
-            QLabel#title { font-size: 26pt; font-weight: 700; color: #14213d; }
-            QLabel#subtitle, QLabel#hint { color: #667085; }
-            QLabel#fieldLabel { font-weight: 600; color: #344054; }
-            QGroupBox { background: #ffffff; border: 1px solid #d8dee9; border-radius: 10px; margin-top: 10px; padding-top: 8px; font-weight: 600; }
-            QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 5px; color: #344054; }
-            QLineEdit, QComboBox, QSpinBox, QPlainTextEdit { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 7px; padding: 8px; selection-background-color: #2563eb; }
-            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus { border: 2px solid #5b8def; padding: 7px; }
-            QPushButton { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px 16px; font-weight: 600; }
-            QPushButton:hover { background: #eef4ff; border-color: #8bb0f5; }
-            QPushButton#primary { background: #2563eb; border-color: #2563eb; color: #ffffff; }
-            QPushButton#primary:hover { background: #1d4ed8; }
-            QPushButton:disabled { color: #98a2b3; background: #eef1f5; }
-            QProgressBar { height: 8px; border: 0; border-radius: 4px; background: #e5e7eb; text-align: center; }
-            QProgressBar::chunk { border-radius: 4px; background: #2563eb; }
+            QMainWindow, QWidget { background: #08111f; color: #e7efff; font-family: 'Segoe UI'; font-size: 10pt; }
+            QLabel#title { font-size: 26pt; font-weight: 700; color: #f4f8ff; }
+            QLabel#subtitle, QLabel#hint { color: #91a4c2; }
+            QLabel#fieldLabel { font-weight: 600; color: #b8c7df; }
+            QGroupBox { background: #0e192b; border: 1px solid #243553; border-radius: 10px; margin-top: 10px; padding-top: 8px; font-weight: 600; }
+            QGroupBox::title { subcontrol-origin: margin; left: 14px; padding: 0 5px; color: #cbd8ee; }
+            QLineEdit, QComboBox, QSpinBox, QPlainTextEdit { background: #0b1424; color: #e7efff; border: 1px solid #2b3d5e; border-radius: 7px; padding: 8px; selection-background-color: #2378ff; }
+            QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QPlainTextEdit:focus { border: 2px solid #3f8cff; padding: 7px; }
+            QPushButton { background: #14233a; color: #e7efff; border: 1px solid #2e4367; border-radius: 7px; padding: 9px 16px; font-weight: 600; }
+            QPushButton:hover { background: #1a3153; border-color: #4a8fff; }
+            QPushButton#primary { background: #1677ff; border-color: #1677ff; color: #ffffff; }
+            QPushButton#primary:hover { background: #3b8cff; }
+            QPushButton:disabled { color: #64748b; background: #101b2d; }
+            QProgressBar { height: 8px; border: 0; border-radius: 4px; background: #1b2b45; text-align: center; }
+            QProgressBar::chunk { border-radius: 4px; background: #1677ff; }
             QPlainTextEdit { font-family: Consolas; font-size: 9pt; }
-            QLabel#preview { background: #101828; color: #98a2b3; border-radius: 8px; padding: 8px; }
-            QListWidget { background: #ffffff; border: 1px solid #cbd5e1; border-radius: 7px; padding: 4px; }
+            QLabel#preview { background: #050b14; color: #91a4c2; border-radius: 8px; padding: 8px; }
+            QListWidget { background: #0b1424; color: #e7efff; border: 1px solid #2b3d5e; border-radius: 7px; padding: 4px; }
             QListWidget::item { padding: 8px; border-radius: 5px; }
-            QListWidget::item:selected { background: #e6efff; color: #14213d; }
+            QListWidget::item:selected { background: #14345f; color: #ffffff; }
         """)
 
     def _choose_source(self):
@@ -232,7 +243,7 @@ class App(QMainWindow):
         recording = item.data(Qt.UserRole)
         self.preview_button.setEnabled(False)
         self.preview_label.setText("Creating preview...")
-        thread = TaskThread("preview", (recording.files,), self)
+        thread = TaskThread("preview", (recording.files, recording.manifest), self)
         self.preview_thread = thread
         thread.preview_signal.connect(self._show_preview)
         thread.error_signal.connect(self._thread_error)
