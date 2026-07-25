@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-python -m PyInstaller --noconfirm --clean --onefile --windowed --name SteamVideoExporter steam_video_exporter.py
+uv run pyinstaller --noconfirm --clean --onefile --windowed --name SteamVideoExporter steam_video_exporter.py
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $distRoot = Join-Path $projectRoot "dist"
