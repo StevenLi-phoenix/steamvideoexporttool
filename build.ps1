@@ -20,6 +20,15 @@ foreach ($binary in @("ffmpeg.exe", "ffprobe.exe")) {
             $source = $command.Source
         }
     }
+    if (-not (Test-Path -LiteralPath $source)) {
+        $ffmpegPackage = Get-ChildItem (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages") -Directory -Filter "Gyan.FFmpeg_*" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($ffmpegPackage) {
+            $candidate = Join-Path $ffmpegPackage.FullName ("bin\" + $binary)
+            if (Test-Path -LiteralPath $candidate) {
+                $source = $candidate
+            }
+        }
+    }
     if (Test-Path -LiteralPath $source) {
         Copy-Item -LiteralPath $source -Destination (Join-Path $distRoot $binary) -Force
     }

@@ -4,7 +4,18 @@
   <img src="assets/app-screenshot.png" alt="Steam Video Exporter application window" width="960">
 </p>
 
-Standalone Windows GUI for losslessly remuxing a Steam Game Recording folder into MP4, MOV, or FLV. It accepts one recording folder or a Steam library root such as `D:\Videos\Steam`; library roots are grouped by each `bg_<appid>_<timestamp>` recording directory so unrelated sessions are never concatenated. The app uses the game name from nearby Steam metadata/app manifests instead of using the selected folder name.
+Standalone Windows GUI for losslessly remuxing Steam Game Recording footage into MP4, MOV, or FLV. It accepts a single recording directory or a Steam library root such as `D:\Videos\Steam`; library roots are grouped by each `bg_<appid>_<timestamp>` directory, so unrelated sessions are never concatenated.
+
+The exporter reads Steam's `session.mpd` manifest when present. This preserves the original DASH video and audio streams with FFmpeg stream copy—no video or audio is re-rendered.
+
+## What it does
+
+- Resolves the Steam game name from local Steam metadata or Steam's app details service, instead of using the recording folder name.
+- Shows each recording in a checkable batch list, with Select all and Clear all actions.
+- Generates a first-frame preview for the selected recording.
+- Supports MP4, MOV, and FLV output, with 16 GB, 64 GB, or custom maximum segment sizes.
+- Supports custom output folders and filename tokens.
+- Runs preflight checks for source discovery, FFmpeg, output writability, and available disk space.
 
 ## Run from source
 
@@ -34,7 +45,19 @@ The included build script uses the uv-managed environment and does not call `pip
 .\build.ps1
 ```
 
-If FFmpeg is not installed globally, place `ffmpeg.exe` and `ffprobe.exe` in the project folder before building. The script includes them in the `dist` folder next to the EXE.
+The build script resolves FFmpeg and FFprobe from the project folder or `PATH`, then copies both next to the EXE in `dist`. Keep all three files together when moving the standalone app.
+
+## Exporting a whole Steam library and deleting source fragments
+
+For a large library with insufficient free space to duplicate everything at once, use the sequential migration script. It exports one recording at a time to `D:\Videos\Steam\exports`, verifies the resulting MP4 segments with FFprobe, then deletes only that recording's original `bg_*` source folder before starting the next one.
+
+> Warning: this permanently deletes the original Steam recording fragments after verification. Confirm that `D:\Videos\Steam\exports` is the intended destination before running it.
+
+```powershell
+uv run python -m scripts.export_library_and_prune --delete-sources
+```
+
+The script intentionally stops on any failed preflight, remux, or duration verification; it keeps the current source recording intact when that happens. Progress is written to `D:\Videos\Steam\exports\export-and-prune.log`.
 
 ## Filename tokens
 
