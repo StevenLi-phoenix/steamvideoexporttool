@@ -6,11 +6,16 @@ repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
 if command -v uv >/dev/null 2>&1; then
+  uv run --group lint ruff check .
+  uv run --group lint ruff format --check .
   uv run --group test coverage run -m unittest discover -s tests -v
   uv run --group test coverage report --fail-under=80
 elif [ -f "$LOCALAPPDATA/Microsoft/WinGet/Packages/astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe/uv.exe" ]; then
-  "$LOCALAPPDATA/Microsoft/WinGet/Packages/astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe/uv.exe" run --group test coverage run -m unittest discover -s tests -v
-  "$LOCALAPPDATA/Microsoft/WinGet/Packages/astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe/uv.exe" run --group test coverage report --fail-under=80
+  uv="$LOCALAPPDATA/Microsoft/WinGet/Packages/astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe/uv.exe"
+  "$uv" run --group lint ruff check .
+  "$uv" run --group lint ruff format --check .
+  "$uv" run --group test coverage run -m unittest discover -s tests -v
+  "$uv" run --group test coverage report --fail-under=80
 elif [ -f ".venv/Scripts/python.exe" ]; then
   .venv/Scripts/python.exe -m coverage run -m unittest discover -s tests -v
   .venv/Scripts/python.exe -m coverage report --fail-under=80

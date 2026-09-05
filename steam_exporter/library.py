@@ -1,4 +1,5 @@
 """Cached recording discovery with bounded multiprocessing for filesystem work."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,6 +7,7 @@ import json
 import os
 import tempfile
 import time
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from multiprocessing import get_context
 from pathlib import Path
@@ -15,12 +17,12 @@ from .media import RECORDING_DIR_APPID, resolve_game_name
 CACHE_TTL = 300  # Also recheck in-place edits that do not change directory timestamps.
 
 
-def cache_path(source):
+def cache_path(source: Path | str) -> Path:
     key = hashlib.sha256(str(Path(source).resolve()).casefold().encode()).hexdigest()[:24]
     return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "SteamQuickExport" / f"library-{key}.json"
 
 
-def read_cache(path):
+def read_cache(path: Path | str) -> dict:
     try:
         value = json.loads(Path(path).read_text(encoding="utf-8"))
         if value.get("version") == 1 and isinstance(value.get("recordings"), dict) and isinstance(value.get("names"), dict):
@@ -30,7 +32,7 @@ def read_cache(path):
     return {"version": 1, "recordings": {}, "names": {}}
 
 
-def inspect_folder(folder):
+def inspect_folder(folder: str) -> dict:
     """Spawn-safe worker. scandir reuses Windows enumeration metadata for sizes."""
     total = 0
     directories = {}
@@ -48,23 +50,31 @@ def inspect_folder(folder):
                     total += entry.stat(follow_symlinks=False).st_size
     manifest = Path(folder) / "session.mpd"
     stat = manifest.stat()
-    return {"size": total, "directories": directories,
-            "manifest": [stat.st_mtime_ns, stat.st_size], "checked": time.time()}
+    return {"size": total, "directories": directories, "manifest": [stat.st_mtime_ns, stat.st_size], "checked": time.time()}
 
 
-def valid(folder, entry, now):
+def valid(folder: str, entry: dict, now: float) -> bool:
     try:
         if not isinstance(entry["size"], int) or entry["size"] < 0 or now - entry["checked"] >= CACHE_TTL:
             return False
         stat = (Path(folder) / "session.mpd").stat()
-        return ([stat.st_mtime_ns, stat.st_size] == entry["manifest"]
-                and bool(entry["directories"])
-                and all(os.stat(p).st_mtime_ns == stamp for p, stamp in entry["directories"].items()))
+        return (
+            [stat.st_mtime_ns, stat.st_size] == entry["manifest"]
+            and bool(entry["directories"])
+            and all(os.stat(p).st_mtime_ns == stamp for p, stamp in entry["directories"].items())
+        )
     except (OSError, KeyError, TypeError, AttributeError):
         return False
 
 
-def scan_library(source, log=lambda _: None, *, force=False, cache_file=None, workers=4):
+def scan_library(
+    source: Path | str,
+    log: Callable[[str], None] = lambda _: None,
+    *,
+    force: bool = False,
+    cache_file: Path | str | None = None,
+    workers: int = 4,
+) -> list[tuple[str, str, list[tuple[Path, int]]]]:
     source = Path(source).resolve()
     path = Path(cache_file) if cache_file else cache_path(source)
     cache = read_cache(path)
@@ -101,8 +111,12 @@ def scan_library(source, log=lambda _: None, *, force=False, cache_file=None, wo
     unresolved = []
     for appid, rows in groups.items():
         entry = names.get(appid, {})
-        if (force or not isinstance(entry, dict) or not isinstance(entry.get("name"), str)
-                or now - entry.get("checked", 0) > entry.get("ttl", 0)):
+        if (
+            force
+            or not isinstance(entry, dict)
+            or not isinstance(entry.get("name"), str)
+            or now - entry.get("checked", 0) > entry.get("ttl", 0)
+        ):
             unresolved.append((appid, rows[0][0]))
     if unresolved:
         with ThreadPoolExecutor(max_workers=min(4, len(unresolved))) as pool:

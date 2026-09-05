@@ -4,6 +4,7 @@ FFmpeg/ffprobe subprocesses are faked: probes return canned JSON and remuxes
 write real small files, driven with a tiny injectable size cap so the
 split/verify/publish logic runs for real.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,8 +16,7 @@ from unittest.mock import patch
 
 import scripts.export_game as export_game
 
-STREAMS = [{"codec_type": "video", "codec_name": "h264"},
-           {"codec_type": "audio", "codec_name": "aac"}]
+STREAMS = [{"codec_type": "video", "codec_name": "h264"}, {"codec_type": "audio", "codec_name": "aac"}]
 
 
 class FakeMedia:
@@ -78,16 +78,15 @@ class ExportGameTests(unittest.TestCase):
 
     def run_main(self, limit=1000, recording=None):
         export_game.main(
-            ["--source", str(self.source.parent), "--output", str(self.output),
-             "--appid", "620", "--game", "Portal 2"] + (recording or []),
-            log=lambda message: None, limit=limit,
+            ["--source", str(self.source.parent), "--output", str(self.output), "--appid", "620", "--game", "Portal 2"] + (recording or []),
+            log=lambda message: None,
+            limit=limit,
         )
 
     def test_remux_publishes_verified_output_and_writes_report(self):
         self.run_main()
         exports = sorted(self.output.glob("*.mp4"))
-        self.assertEqual([path.name for path in exports],
-                         ["Portal 2_2026-07-25_10-45-00_001_of_001.mp4"])
+        self.assertEqual([path.name for path in exports], ["Portal 2_2026-07-25_10-45-00_001_of_001.mp4"])
         report = json.loads((self.output / "verification.json").read_text(encoding="utf-8"))
         self.assertEqual(len(report), 1)
         self.assertTrue(report[0]["stream_copy"])
@@ -133,8 +132,7 @@ class ExportGameTests(unittest.TestCase):
         self.assertIn("pending export", str(raised.exception))
 
     def test_insufficient_disk_space_is_refused(self):
-        with patch.object(export_game.shutil, "disk_usage",
-                          return_value=SimpleNamespace(free=0)):
+        with patch.object(export_game.shutil, "disk_usage", return_value=SimpleNamespace(free=0)):
             with self.assertRaises(RuntimeError) as raised:
                 self.run_main()
         self.assertIn("free space", str(raised.exception))
@@ -144,8 +142,7 @@ class ExportGameTests(unittest.TestCase):
         self.output.mkdir(parents=True, exist_ok=True)
         (self.output / stamp).write_bytes(b"previous export")
         self.run_main()
-        self.assertEqual(sorted(path.name for path in self.output.glob("*.mp4")),
-                         [stamp, Path(stamp).stem + "_2.mp4"])
+        self.assertEqual(sorted(path.name for path in self.output.glob("*.mp4")), [stamp, Path(stamp).stem + "_2.mp4"])
 
     def test_probe_failure_surfaces_ffmpeg_stderr(self):
         # Unregistered staged part -> ffprobe "fails" with its stderr message.
@@ -155,8 +152,7 @@ class ExportGameTests(unittest.TestCase):
         self.assertIn("Invalid data found", str(raised.exception))
 
     def test_missing_video_stream_is_rejected(self):
-        self.media.register(self.source / "session.mpd", 100.0,
-                            streams=[{"codec_type": "audio", "codec_name": "aac"}])
+        self.media.register(self.source / "session.mpd", 100.0, streams=[{"codec_type": "audio", "codec_name": "aac"}])
         with self.assertRaises(RuntimeError) as raised:
             self.run_main()
         self.assertIn("Missing video", str(raised.exception))

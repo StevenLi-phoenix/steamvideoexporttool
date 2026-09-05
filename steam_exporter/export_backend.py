@@ -1,4 +1,5 @@
 """Spawned export worker. No Qt imports or UI callbacks in this process."""
+
 from datetime import datetime
 from pathlib import Path
 

@@ -4,6 +4,7 @@ This is the single export pipeline used by both the GUI backend and the
 batch migration script: stream-copy remux, split over the strict size cap,
 verify duration and streams, then publish.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -19,10 +20,14 @@ LIMIT = 64_000_000_000
 
 
 def _probe(ffprobe: Path, path: Path) -> dict:
-    result = subprocess.run([str(ffprobe), "-v", "error", "-show_format", "-show_streams",
-                             "-of", "json", str(path)], capture_output=True, encoding="utf-8",
-                            errors="replace", timeout=120,
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    result = subprocess.run(
+        [str(ffprobe), "-v", "error", "-show_format", "-show_streams", "-of", "json", str(path)],
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
     if result.returncode:
         raise RuntimeError(f"ffprobe failed on {path}: {result.stderr[-2000:]}")
     data = json.loads(result.stdout)
@@ -32,19 +37,20 @@ def _probe(ffprobe: Path, path: Path) -> dict:
 
 
 def _remux(ffmpeg: Path, source: Path, target: Path, seconds: float | None = None) -> None:
-    command = [str(ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error", "-n",
-               "-i", str(source), "-map", "0", "-c", "copy"]
+    command = [str(ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error", "-n", "-i", str(source), "-map", "0", "-c", "copy"]
     if seconds is not None:
         command += ["-f", "segment", "-segment_time", str(seconds), "-reset_timestamps", "1"]
     command.append(str(target))
-    result = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace",
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    result = subprocess.run(
+        command, capture_output=True, encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    )
     if result.returncode:
         raise RuntimeError(result.stderr[-4000:])
 
 
-def process_recording(folder: Path, staging: Path, ffmpeg: Path, ffprobe: Path,
-                      *, limit: int = LIMIT, log=print) -> list[tuple[Path, dict]]:
+def process_recording(
+    folder: Path, staging: Path, ffmpeg: Path, ffprobe: Path, *, limit: int = LIMIT, log=print
+) -> list[tuple[Path, dict]]:
     """Stream-copy one bg_ recording folder into staging, split any part over the
     strict size cap, and verify total duration and streams against the source."""
     manifest = folder / "session.mpd"
@@ -82,8 +88,7 @@ def process_recording(folder: Path, staging: Path, ffmpeg: Path, ffprobe: Path,
     return parts
 
 
-def publish(part: Path, data: dict, output: Path, game: str, folder: Path, index: int, total: int,
-            *, limit: int = LIMIT) -> dict:
+def publish(part: Path, data: dict, output: Path, game: str, folder: Path, index: int, total: int, *, limit: int = LIMIT) -> dict:
     """Rename a verified staged part to its final export name, avoiding collisions."""
     stamp = recording_timestamp(folder).strftime("%Y-%m-%d_%H-%M-%S")
     dest = output / f"{safe_name(game)}_{stamp}_{index:03d}_of_{total:03d}.mp4"
@@ -93,8 +98,7 @@ def publish(part: Path, data: dict, output: Path, game: str, folder: Path, index
     if not 0 < size < limit:
         raise RuntimeError("Output violates strict size cap")
     part.rename(dest)
-    return {"file": str(dest), "bytes": size, "source": str(folder),
-            "duration": float(data["format"]["duration"]), "stream_copy": True}
+    return {"file": str(dest), "bytes": size, "source": str(folder), "duration": float(data["format"]["duration"]), "stream_copy": True}
 
 
 def discard_staging(staging: Path) -> None:
@@ -139,8 +143,10 @@ def main(argv=None, log=print, limit=LIMIT):
         for part, data in process_recording(folder, staging, ffmpeg, ffprobe, limit=limit, log=log):
             entries.append((part, data, folder))
 
-    report = [publish(part, data, args.output, args.game, folder, number, len(entries), limit=limit)
-              for number, (part, data, folder) in enumerate(entries, 1)]
+    report = [
+        publish(part, data, args.output, args.game, folder, number, len(entries), limit=limit)
+        for number, (part, data, folder) in enumerate(entries, 1)
+    ]
     (args.output / "verification.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     discard_staging(staging)
     log(f"COMPLETE: {len(report)} files, {sum(r['bytes'] for r in report)} bytes; all < {limit}. Sources retained.")

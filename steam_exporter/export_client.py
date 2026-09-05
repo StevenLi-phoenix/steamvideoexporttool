@@ -1,4 +1,5 @@
 """Nonblocking Qt adapter for the separate export process."""
+
 import subprocess
 from multiprocessing import get_context
 
@@ -48,8 +49,9 @@ class ExportClient(QObject):
             return
         self.cancel_requested = True
         # The backend owns FFmpeg; terminate the whole Windows process tree.
-        subprocess.run(["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
-                       capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        subprocess.run(
+            ["taskkill", "/PID", str(self.process.pid), "/T", "/F"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW
+        )
 
     def poll(self):
         # Bound event processing so even a noisy backend cannot monopolize Qt.

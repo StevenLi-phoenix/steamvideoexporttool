@@ -8,6 +8,7 @@ Draws a simple, original mark (not Steam's logo) evoking "export a recording":
 a play triangle over a rounded dark tile, with a small downward export arrow
 badge. Regenerate at a larger SIZE and re-run if a sharper source is needed.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -17,10 +18,10 @@ from PIL import Image, ImageDraw
 SIZE = 1024
 OUT = Path(__file__).resolve().parent.parent / "assets" / "app-icon.ico"
 
-BACKGROUND = (17, 24, 32, 255)      # near-black navy tile
-ACCENT = (102, 192, 244, 255)       # light blue play glyph
-BADGE = (37, 47, 61, 255)           # export-arrow badge circle
-ARROW = (237, 245, 250, 255)        # white-ish arrow
+BACKGROUND = (17, 24, 32, 255)  # near-black navy tile
+ACCENT = (102, 192, 244, 255)  # light blue play glyph
+BADGE = (37, 47, 61, 255)  # export-arrow badge circle
+ARROW = (237, 245, 250, 255)  # white-ish arrow
 
 
 def draw_icon():
@@ -30,7 +31,8 @@ def draw_icon():
     margin = SIZE * 0.06
     draw.rounded_rectangle(
         [margin, margin, SIZE - margin, SIZE - margin],
-        radius=SIZE * 0.22, fill=BACKGROUND,
+        radius=SIZE * 0.22,
+        fill=BACKGROUND,
     )
 
     # Play triangle, centered and slightly left-shifted so it reads as centered

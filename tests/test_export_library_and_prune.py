@@ -1,4 +1,5 @@
 """Safety-gate tests for the destructive scripts/export_library_and_prune.py."""
+
 from __future__ import annotations
 
 import json
@@ -7,8 +8,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import scripts.export_game as export_game
 import scripts.export_library_and_prune as prune
-from tests.test_export_game import FakeMedia, STREAMS
+from tests.test_export_game import STREAMS, FakeMedia
 
 
 def make_recording(root: Path, name="bg_620_20260725_104500") -> Path:
@@ -26,7 +28,7 @@ class PruneScriptTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.media = FakeMedia()
         self.patchers = [
-            patch.object(prune.subprocess, "run", side_effect=self.media.run),
+            patch.object(export_game.subprocess, "run", side_effect=self.media.run),
             patch.object(prune, "find_executable", side_effect=lambda name, ffmpeg_path=None: Path(f"{name}.exe")),
             patch.object(prune, "LIMIT", 1000),
             patch.object(prune, "resolve_game_name", return_value="Portal 2"),

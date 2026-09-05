@@ -79,7 +79,7 @@ def _unescape_vdf(value: str) -> str:
     out: list[str] = []
     index = 0
     while index < len(value):
-        pair = value[index:index + 2]
+        pair = value[index : index + 2]
         if pair in _VDF_ESCAPES:
             out.append(_VDF_ESCAPES[pair])
             index += 2
@@ -192,6 +192,7 @@ def recording_timestamp(folder: Path) -> datetime:
             pass
     return datetime.now()
 
+
 def _escape_concat_path(path: Path) -> str:
     return str(path.resolve()).replace("'", "'\\''")
 
@@ -224,9 +225,14 @@ def extract_preview_frames(files: list[Path], destination_dir: Path, manifest: P
         else:
             probe += ["-f", "concat", "-safe", "0", "-i", str(concat_list)]
         probe += ["-show_entries", "format=duration", "-of", "default=nk=1:nw=1"]
-        result = subprocess.run(probe, capture_output=True, encoding="utf-8", errors="replace",
-                                timeout=PROBE_TIMEOUT_SECONDS,
-                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        result = subprocess.run(
+            probe,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=PROBE_TIMEOUT_SECONDS,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
         try:
             duration = max(0.0, float(result.stdout.strip()))
         except ValueError:
@@ -242,16 +248,29 @@ def extract_preview_frames(files: list[Path], destination_dir: Path, manifest: P
             else:
                 command += ["-f", "concat", "-safe", "0", "-i", str(concat_list)]
         for index in range(4):
-            command += ["-map", f"{index}:v:0", "-frames:v", "1", "-vf", "scale=320:-2",
-                        "-q:v", "5", str(destination_dir / f"frame_{index + 1}.jpg")]
+            command += [
+                "-map",
+                f"{index}:v:0",
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=320:-2",
+                "-q:v",
+                "5",
+                str(destination_dir / f"frame_{index + 1}.jpg"),
+            ]
         try:
-            created = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace",
-                                     timeout=PROBE_TIMEOUT_SECONDS,
-                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+            created = subprocess.run(
+                command,
+                capture_output=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=PROBE_TIMEOUT_SECONDS,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+            )
         except subprocess.TimeoutExpired:
             raise ConversionError("FFmpeg timed out while generating the preview.") from None
-        outputs = [destination_dir / f"frame_{index}.jpg" for index in range(1, 5)
-                   if (destination_dir / f"frame_{index}.jpg").exists()]
+        outputs = [destination_dir / f"frame_{index}.jpg" for index in range(1, 5) if (destination_dir / f"frame_{index}.jpg").exists()]
         if created.returncode != 0:
             outputs = []
         if not outputs:

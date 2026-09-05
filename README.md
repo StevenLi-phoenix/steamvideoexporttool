@@ -83,3 +83,7 @@ uv run python -m scripts.export_library_and_prune --delete-sources --source "D:\
 Each exported recording gets a `verification-<recording>.json` report. It
 stops on any failed remux or verification, leaving the current source
 recording intact.
+
+## License
+
+[MIT](LICENSE)

@@ -10,7 +10,6 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -28,12 +27,14 @@ def main(argv=None) -> None:
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, default=default_source_root(),
-                        help="Steam video root containing the video\\bg_* folders (default: %%USERPROFILE%%\\Videos\\Steam).")
-    parser.add_argument("--output", type=Path, default=None,
-                        help="Export destination (default: <source>\\exports).")
-    parser.add_argument("--delete-sources", action="store_true",
-                        help="Delete each source recording only after verification.")
+    parser.add_argument(
+        "--source",
+        type=Path,
+        default=default_source_root(),
+        help="Steam video root containing the video\\bg_* folders (default: %%USERPROFILE%%\\Videos\\Steam).",
+    )
+    parser.add_argument("--output", type=Path, default=None, help="Export destination (default: <source>\\exports).")
+    parser.add_argument("--delete-sources", action="store_true", help="Delete each source recording only after verification.")
     args = parser.parse_args(argv)
     if not args.delete_sources:
         raise SystemExit("Refusing to delete source footage without --delete-sources.")
@@ -65,10 +66,10 @@ def main(argv=None) -> None:
         try:
             game = resolve_game_name(folder)
             parts = process_recording(folder, staging, ffmpeg, ffprobe, log=lambda m: print(m, flush=True))
-            report = [publish(part, data, output_root, game, folder, index, len(parts))
-                      for index, (part, data) in enumerate(parts, 1)]
+            report = [publish(part, data, output_root, game, folder, index, len(parts)) for index, (part, data) in enumerate(parts, 1)]
             (output_root / f"verification-{folder.name}.json").write_text(
-                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             for entry in report:
                 exported = Path(entry["file"])
                 if not exported.is_file() or exported.stat().st_size <= 0:

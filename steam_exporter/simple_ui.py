@@ -1,31 +1,44 @@
 """Recording-library UI; media processing lives in export_game and media."""
+
 from __future__ import annotations
 
 import os
-import tempfile
-import sys
 import subprocess
+import sys
+import tempfile
 import webbrowser
 import winreg
-from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QPalette, QColor
-from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QSplitter, QTreeWidget, QTreeWidgetItem,
-    QVBoxLayout, QWidget)
+from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
+    QPushButton,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .export_client import ExportClient
 from .library import scan_library
-from .media import resolve_game_name, safe_name, recording_timestamp, extract_preview_frames, find_executable, resource_path
+from .media import extract_preview_frames, find_executable, recording_timestamp, resource_path, safe_name
 
 
 def videos_path():
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                           r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as key:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as key:
             return Path(os.path.expandvars(winreg.QueryValueEx(key, "My Video")[0]))
     except OSError:
         return Path.home() / "Videos"
@@ -202,8 +215,7 @@ class SimpleApp(QMainWindow):
 
     def busy(self, value):
         self.working = value
-        for widget in [self.games, self.recordings, self.location, self.destination,
-                       self.refresh, self.select_all, self.select_none]:
+        for widget in [self.games, self.recordings, self.location, self.destination, self.refresh, self.select_all, self.select_none]:
             widget.setEnabled(not value)
         self.progress.setRange(0, 0 if value else 100)
         self.selection_changed()
@@ -261,9 +273,11 @@ class SimpleApp(QMainWindow):
         self.selection_changed()
 
     def selected(self):
-        return [self.recordings.topLevelItem(i).data(0, Qt.UserRole)
-                for i in range(self.recordings.topLevelItemCount())
-                if self.recordings.topLevelItem(i).checkState(0) == Qt.Checked]
+        return [
+            self.recordings.topLevelItem(i).data(0, Qt.UserRole)
+            for i in range(self.recordings.topLevelItemCount())
+            if self.recordings.topLevelItem(i).checkState(0) == Qt.Checked
+        ]
 
     def selection_changed(self, *args):
         count = len(self.selected())
@@ -280,24 +294,29 @@ class SimpleApp(QMainWindow):
         folder = Path(item.data(0, Qt.UserRole))
         for frame in self.preview_frames:
             frame.setText("正在读取…")
+
         def action(log):
             with tempfile.TemporaryDirectory(prefix="steam-preview-") as temp:
                 targets = extract_preview_frames([], Path(temp), folder / "session.mpd")
                 return (str(folder), [target.read_bytes() for target in targets])
+
         def done(result):
             current = self.recordings.currentItem()
             if current and current.data(0, Qt.UserRole) == result[0]:
-                for frame, data in zip(self.preview_frames, result[1]):
+                for frame, data in zip(self.preview_frames, result[1], strict=False):
                     pixmap = QPixmap()
                     pixmap.loadFromData(data)
                     frame.setPixmap(pixmap.scaled(frame.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+
         self.preview_job = Job(action, self)
         self.preview_job.result.connect(done)
         self.preview_job.failed.connect(lambda _: [frame.setText("预览不可用") for frame in self.preview_frames])
+
         def next_preview():
             current = self.recordings.currentItem()
             if current and current.data(0, Qt.UserRole) != str(folder):
                 self.show_preview(current)
+
         self.preview_job.finished.connect(next_preview)
         self.preview_job.start()
 
@@ -357,11 +376,17 @@ class SimpleApp(QMainWindow):
 def configure_app(app):
     app.setStyle("Fusion")
     palette = QPalette()
-    for role, color in [(QPalette.Window, "#fafafa"), (QPalette.WindowText, "#202020"),
-                        (QPalette.Base, "#ffffff"), (QPalette.AlternateBase, "#f6f6f6"),
-                        (QPalette.Text, "#202020"), (QPalette.Button, "#f5f5f5"),
-                        (QPalette.ButtonText, "#202020"), (QPalette.Highlight, "#dedede"),
-                        (QPalette.HighlightedText, "#111111")]:
+    for role, color in [
+        (QPalette.Window, "#fafafa"),
+        (QPalette.WindowText, "#202020"),
+        (QPalette.Base, "#ffffff"),
+        (QPalette.AlternateBase, "#f6f6f6"),
+        (QPalette.Text, "#202020"),
+        (QPalette.Button, "#f5f5f5"),
+        (QPalette.ButtonText, "#202020"),
+        (QPalette.Highlight, "#dedede"),
+        (QPalette.HighlightedText, "#111111"),
+    ]:
         palette.setColor(role, QColor(color))
     app.setPalette(palette)
     icon_path = resource_path("assets", "app-icon.ico")
@@ -380,8 +405,9 @@ def main():
             binary = find_executable(name, find_executable("ffmpeg"))
             if not binary:
                 raise RuntimeError(f"Missing bundled {name}")
-            subprocess.run([str(binary), "-version"], check=True, capture_output=True,
-                           creationflags=subprocess.CREATE_NO_WINDOW, timeout=20)
+            subprocess.run(
+                [str(binary), "-version"], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=20
+            )
         if "--scan-self-test" in sys.argv:
             scan_library(window.source, force=True)
         QTimer.singleShot(100, app.quit)

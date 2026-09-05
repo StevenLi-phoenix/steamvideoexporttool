@@ -10,3 +10,5 @@ dist-*/
 *.spec
 .coverage
 .steam-export-*/
+.pytest_cache/
+.claude/
