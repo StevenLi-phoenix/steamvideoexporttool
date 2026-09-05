@@ -24,6 +24,11 @@ follows [Keep a Changelog](https://keepachangelog.com/) and the project uses
 
 ### Changed
 
+- **~43 MB smaller bundle**: PyInstaller now excludes the PySide6 modules the
+  app never uses (QML/Quick, PDF, Network, SVG, OpenGL, VirtualKeyboard) and
+  the build script strips their Qt DLLs, plugins, and the 20 MB software
+  OpenGL renderer from the onedir bundle. PySide6 93 → 49 MB, full bundle
+  279 → 236 MB, no-FFmpeg zip 49 → 27 MB.
 - **Real export progress**: the progress bar now streams FFmpeg's own
   `-progress` feed (20 Hz) mapped over the whole task — recording count plus
   in-recording percentage — instead of an indeterminate spinner.
