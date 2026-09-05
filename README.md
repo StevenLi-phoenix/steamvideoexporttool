@@ -49,7 +49,7 @@ The build script resolves FFmpeg and FFprobe from the project folder or `PATH`, 
 
 ## Exporting a whole Steam library and deleting source fragments
 
-For a large library with insufficient free space to duplicate everything at once, use the sequential migration script. It exports one recording at a time to `D:\Videos\Steam\exports`, verifies the resulting MP4 segments with FFprobe, then deletes only that recording's original `bg_*` source folder before starting the next one.
+For a large library with insufficient free space to duplicate everything at once, use the sequential migration script. It exports one recording at a time to `D:\Videos\Steam\exports`, verifies the resulting MP4 segments with FFprobe, then deletes only that recording's original `bg_*` source folder before starting the next one. Its default maximum segment size is 64 GB.
 
 > Warning: this permanently deletes the original Steam recording fragments after verification. Confirm that `D:\Videos\Steam\exports` is the intended destination before running it.
 
@@ -66,6 +66,37 @@ The default pattern is `{game}_{date}_{time}_part{index}.{ext}`.
 Available tokens are `{game}`, `{source}`, `{date}` (`YYYY-MM-DD`), `{time}` (`HH-MM-SS`), `{index}` (`001`, `002`, ...), and `{ext}`.
 
 ## Notes
+
+### Simple game exporter
+
+Run `uv run python steam_quick_export.py`, or launch the packaged
+`dist-simple/SteamQuickExport/SteamQuickExport.exe`. This separate, Chinese-language
+interface automatically lists games and their recordings. Click a game, select
+recordings using checkboxes, and click a recording for a first-frame preview.
+No AppID entry is needed. Output defaults to the Windows Videos folder under
+`exported/<game>/`; change locations using the location buttons. Sources are retained.
+
+Library scans use up to four worker processes, with parallel game-name lookups.
+Metadata is cached under `%LOCALAPPDATA%/SteamQuickExport/`. Refresh checks directory
+and manifest changes; unchanged sizes are reused for up to five minutes (export
+preflight still reads current source files). Game names are cached for seven days.
+Hold Shift while clicking Refresh to bypass the cache. Removed recordings disappear
+on refresh, and corrupt cache files are rebuilt automatically.
+
+The UI includes Open Steam Recordings, which opens Steam Settings so the user can
+manage Game Recording storage and delete recordings through Steam. Click Refresh
+after making changes; removed `bg_*` folders disappear from the app automatically.
+
+This interface uses MP4 stream copy and a strict decimal 64 GB limit
+(64,000,000,000 bytes). Oversized files are split at keyframes and checked again.
+Names include the recording timestamp and global `001_of_056` episode numbering.
+It checks disk space, output sizes, durations and stream codecs, and writes
+`verification.json`; this is not a full frame-by-frame decode test.
+Existing exports or pending work are not overwritten; another export uses a dated
+subfolder. Build with `./build-quick.ps1`, which isolates PATH to prevent unrelated
+ICU DLLs from being packaged with Qt.
+Keep the entire packaged application directory together; it contains Python, Qt,
+FFmpeg and ffprobe. The Videos-folder shortcut points to this directory.
 
 - Preflight checks the input folder, recording grouping, `.m4s` discovery, FFmpeg availability, output-folder writability, and free disk space.
 - After preflight, each recording folder appears as a checked item; clear individual items or use Select all/Clear all to choose a partial batch.

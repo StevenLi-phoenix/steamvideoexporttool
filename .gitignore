@@ -3,6 +3,8 @@ __pycache__/
 .venv/
 .uv/
 build/
+build-simple/
+simple-ui-preview.png
 dist/
 dist-*/
 *.spec

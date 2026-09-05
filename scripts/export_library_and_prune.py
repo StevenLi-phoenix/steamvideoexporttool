@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from steam_exporter.media import SteamExporter, find_executable, format_bytes
@@ -17,7 +18,7 @@ from steam_exporter.models import ConversionError
 
 SOURCE_ROOT = Path(r"D:\Videos\Steam")
 OUTPUT_ROOT = SOURCE_ROOT / "exports"
-SEGMENT_LIMIT = 16 * 1024**3
+SEGMENT_LIMIT = 64 * 1024**3
 
 
 def duration(path: Path, ffprobe: Path | None) -> float | None:
@@ -49,6 +50,10 @@ def verify_outputs(created: set[Path], source_duration: float | None, ffprobe: P
 
 
 def main() -> None:
+    # Start-Process output redirection inherits the active Windows code page by default.
+    # Steam game names can contain characters outside that page, so make logs UTF-8 safe.
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser()
     parser.add_argument("--delete-sources", action="store_true", help="Delete each source recording only after verification.")
     args = parser.parse_args()
