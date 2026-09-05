@@ -19,11 +19,14 @@ test = [
 default-groups = ["build"]
 
 [tool.coverage.run]
-source = ["steam_exporter"]
+source = ["steam_exporter", "scripts"]
 omit = [
     "steam_exporter/simple_ui.py",
     "steam_exporter/export_client.py",
     "steam_exporter/export_backend.py",
+    "scripts/check_export_ipc.py",
+    "scripts/benchmark_scan.py",
+    "scripts/generate_icon.py",
 ]
 
 [tool.coverage.report]

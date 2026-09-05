@@ -22,7 +22,7 @@ def default_source_root() -> Path:
     return Path(os.environ.get("USERPROFILE", str(Path.home()))) / "Videos" / "Steam"
 
 
-def main() -> None:
+def main(argv=None) -> None:
     # Start-Process output redirection inherits the active Windows code page by default.
     # Steam game names can contain characters outside that page, so make logs UTF-8 safe.
     sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
@@ -34,7 +34,7 @@ def main() -> None:
                         help="Export destination (default: <source>\\exports).")
     parser.add_argument("--delete-sources", action="store_true",
                         help="Delete each source recording only after verification.")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.delete_sources:
         raise SystemExit("Refusing to delete source footage without --delete-sources.")
 

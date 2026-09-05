@@ -1,4 +1,9 @@
-"""Exercise the export IPC while checking that the Qt event loop keeps ticking."""
+"""Exercise the export IPC while checking that the Qt event loop keeps ticking.
+
+Requires real Steam recordings. Pass --source pointing at the video root that
+holds bg_* folders; it defaults to %USERPROFILE%\\Videos\\Steam\\video.
+"""
+import argparse
 import json
 from multiprocessing import freeze_support
 from pathlib import Path
@@ -9,6 +14,10 @@ from steam_exporter.export_client import ExportClient
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source", type=Path, default=Path.home() / "Videos" / "Steam" / "video",
+                        help="Steam video root containing bg_* recording folders.")
+    args = parser.parse_args()
     app = QCoreApplication([])
     with tempfile.TemporaryDirectory() as temp:
         for succeeds in (True, False):
@@ -24,12 +33,11 @@ def main():
             client.completed.connect(completed.append)
             client.failed.connect(errors.append)
             client.finished.connect(loop.quit)
-            source_root = Path('D:/Videos/Steam/video')
-            candidates = list(source_root.glob('bg_*'))
+            candidates = list(args.source.glob('bg_*'))
             recording = min(candidates, key=lambda folder: sum(p.stat().st_size for p in folder.rglob('*.m4s')))
-            assert recording, 'No test recording available'
+            assert recording, f'No test recording available under {args.source}'
             appid = recording.name.split('_')[1]
-            source = str(source_root) if succeeds else str(Path(temp)/'missing')
+            source = str(args.source) if succeeds else str(Path(temp)/'missing')
             output = Path(temp) / ('success' if succeeds else 'failure')
             heartbeat.start()
             deadline.start(30000)
