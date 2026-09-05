@@ -72,9 +72,14 @@ class ExportGameTests(unittest.TestCase):
         self.output = self.root / "out"
         self.media = FakeMedia()
         self.media.register(self.source / "session.mpd", 100.0)
-        self.patcher = patch.object(export_game.subprocess, "run", side_effect=self.media.run)
-        self.patcher.start()
-        self.addCleanup(self.patcher.stop)
+        self.patchers = [
+            patch.object(export_game.subprocess, "run", side_effect=self.media.run),
+            # Keep the tests hermetic: no dependence on a real FFmpeg on PATH.
+            patch.object(export_game, "find_executable", side_effect=lambda name, ffmpeg_path=None: Path(f"{name}.exe")),
+        ]
+        for patcher in self.patchers:
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def run_main(self, limit=1000, recording=None):
         export_game.main(
