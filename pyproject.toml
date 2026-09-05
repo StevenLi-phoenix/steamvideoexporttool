@@ -1,6 +1,6 @@
 [project]
 name = "steam-video-exporter"
-version = "0.3.0"
+version = "0.2.3"
 description = "Modern Windows GUI for losslessly remuxing Steam Game Recording M4S files"
 requires-python = ">=3.10"
 dependencies = [

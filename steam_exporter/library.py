@@ -1,4 +1,4 @@
-"""Cached recording discovery with bounded multiprocessing for filesystem work."""
+"""Cached recording discovery with parallel filesystem work."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from pathlib import Path
 from .media import RECORDING_DIR_APPID, resolve_game_name
 
 CACHE_TTL = 300  # Also recheck in-place edits that do not change directory timestamps.
+FALLBACK_NAME_TTL = 3600  # Retry folder-name fallbacks (e.g. offline) after an hour.
 
 
 def cache_path(source: Path | str) -> Path:
@@ -73,7 +74,7 @@ def scan_library(
     *,
     force: bool = False,
     cache_file: Path | str | None = None,
-    workers: int = 4,
+    workers: int = 8,
 ) -> list[tuple[str, str, list[tuple[Path, int]]]]:
     source = Path(source).resolve()
     path = Path(cache_file) if cache_file else cache_path(source)
@@ -94,6 +95,9 @@ def scan_library(
             pending.append(key)
     log(f"{len(folders)} 段录像：{len(records)} 段命中缓存，{len(pending)} 段需要扫描")
     if pending:
+        # Processes, not threads: per-entry Python work (name checks, dict
+        # updates) holds the GIL, so threads measured ~2.6x slower than a
+        # process pool on a real library despite the spawn cost.
         with ProcessPoolExecutor(max_workers=min(workers, len(pending)), mp_context=get_context("spawn")) as pool:
             futures = {pool.submit(inspect_folder, folder): folder for folder in pending}
             for number, future in enumerate(as_completed(futures), 1):
@@ -119,12 +123,15 @@ def scan_library(
         ):
             unresolved.append((appid, rows[0][0]))
     if unresolved:
-        with ThreadPoolExecutor(max_workers=min(4, len(unresolved))) as pool:
+        with ThreadPoolExecutor(max_workers=min(8, len(unresolved))) as pool:
             futures = {pool.submit(resolve_game_name, folder): (appid, folder) for appid, folder in unresolved}
             for future in as_completed(futures):
                 appid, folder = futures[future]
                 name = future.result()
-                names[appid] = {"name": name, "checked": now, "ttl": 60 if name == folder.name else 604800}
+                # A folder-name fallback means metadata is missing (or the store
+                # API is unreachable); retrying every scan would stall each one,
+                # so wait an hour. Shift+refresh bypasses the TTL.
+                names[appid] = {"name": name, "checked": now, "ttl": FALLBACK_NAME_TTL if name == folder.name else 604800}
     cache = {"version": 1, "recordings": records, "names": names}
     # Atomic replacement; overlapping application instances never expose half-written JSON.
     temp = None

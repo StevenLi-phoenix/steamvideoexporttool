@@ -6,7 +6,7 @@ follows [Keep a Changelog](https://keepachangelog.com/) and the project uses
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-09-05
+## [0.2.3] - 2026-09-05
 
 ### Added
 
@@ -34,6 +34,12 @@ follows [Keep a Changelog](https://keepachangelog.com/) and the project uses
   in-recording percentage — instead of an indeterminate spinner.
 - Sizes in the recording list use adaptive units (KB/MB/GB) instead of always
   GB.
+- Faster startup and degraded-network scans: Steam install roots are read once
+  per process instead of once per game, the store-API timeout dropped to 2s
+  with 8 parallel name lookups, and folder-name fallbacks are cached for an
+  hour instead of a minute so offline rescans stop re-stalling (Shift+refresh
+  still forces re-resolution). Import chain slimmed by lazy urllib loading.
+  Scanning itself stays on a process pool — threads measured 2.6x slower.
 
 ### Fixed
 

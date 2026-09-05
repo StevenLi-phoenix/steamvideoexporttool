@@ -1,10 +1,11 @@
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from steam_exporter.library import scan_library
+from steam_exporter.library import FALLBACK_NAME_TTL, scan_library
 
 
 class LibraryTests(unittest.TestCase):
@@ -31,6 +32,22 @@ class LibraryTests(unittest.TestCase):
                 self.assertEqual(scan_library(root, cache_file=cache, force=True)[0][2][0][1], 4)
                 (folder / "session.mpd").unlink()
                 self.assertEqual(scan_library(root, cache_file=cache), [])
+
+    def test_fallback_names_are_cached_for_an_hour_and_real_names_for_a_week(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            folder = root / "bg_2950790_20260824_191110"
+            folder.mkdir()
+            (folder / "session.mpd").write_text("manifest")
+            cache = root / "cache.json"
+            with patch("steam_exporter.library.resolve_game_name", return_value=folder.name):
+                scan_library(root, cache_file=cache)
+            fallback = json.loads(cache.read_text(encoding="utf-8"))["names"]["2950790"]
+            self.assertEqual(fallback["ttl"], FALLBACK_NAME_TTL)
+            with patch("steam_exporter.library.resolve_game_name", return_value="Transport Fever 2"):
+                scan_library(root, cache_file=cache, force=True)
+            resolved = json.loads(cache.read_text(encoding="utf-8"))["names"]["2950790"]
+            self.assertEqual(resolved["ttl"], 604800)
 
     def test_corrupt_cache(self):
         with tempfile.TemporaryDirectory() as tmp:

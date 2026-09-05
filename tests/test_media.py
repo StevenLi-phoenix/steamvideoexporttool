@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import steam_exporter.media as media_module
 from steam_exporter.media import (
     _GAME_NAME_CACHE,
     ConversionError,
@@ -73,12 +74,12 @@ class SteamMetadataTests(unittest.TestCase):
                 return False
 
         _GAME_NAME_CACHE.clear()
-        with patch("steam_exporter.media.urllib.request.urlopen", return_value=Response()) as request:
+        with patch("urllib.request.urlopen", return_value=Response()) as request:
             self.assertEqual(_fetch_steam_game_name("620"), "Portal 2")
             self.assertEqual(_fetch_steam_game_name("620"), "Portal 2")
         request.assert_called_once()
         _GAME_NAME_CACHE.clear()
-        with patch("steam_exporter.media.urllib.request.urlopen", side_effect=OSError):
+        with patch("urllib.request.urlopen", side_effect=OSError):
             self.assertIsNone(_fetch_steam_game_name("missing"))
 
     def test_local_manifest_and_online_fallback_are_used_when_metadata_is_missing(self):
@@ -104,9 +105,16 @@ class SteamMetadataTests(unittest.TestCase):
             escaped = str(library).replace("\\", "\\\\")
             (steam / "steamapps" / "libraryfolders.vdf").write_text(f'"path" "{escaped}"', encoding="utf-8")
             environment = {"PROGRAMFILES(X86)": str(root), "PROGRAMFILES": "", "LOCALAPPDATA": ""}
-            with patch.dict("steam_exporter.media.os.environ", environment, clear=True):
-                roots = _steam_roots()
+            with patch.object(media_module, "_STEAM_ROOTS_CACHE", None):  # reset the per-process cache
+                with patch.dict("steam_exporter.media.os.environ", environment, clear=True):
+                    roots = _steam_roots()
             self.assertEqual(roots, [steam, library])
+
+    def test_steam_roots_are_cached_per_process(self):
+        with patch.object(media_module, "_STEAM_ROOTS_CACHE", None):
+            first = _steam_roots()
+            second = _steam_roots()
+        self.assertIs(first, second)
 
 
 class ProcessHelperTests(unittest.TestCase):

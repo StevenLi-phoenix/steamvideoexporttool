@@ -7,8 +7,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import urllib.parse
-import urllib.request
 from datetime import datetime
 from pathlib import Path
 
@@ -109,9 +107,12 @@ def _parse_steam_name(text: str) -> str | None:
 def _fetch_steam_game_name(appid: str) -> str | None:
     if appid in _GAME_NAME_CACHE:
         return _GAME_NAME_CACHE[appid]
+    import urllib.parse
+    import urllib.request
+
     try:
         query = urllib.parse.urlencode({"appids": appid, "l": "english"})
-        with urllib.request.urlopen(f"https://store.steampowered.com/api/appdetails?{query}", timeout=3) as response:
+        with urllib.request.urlopen(f"https://store.steampowered.com/api/appdetails?{query}", timeout=2) as response:
             payload = json.loads(response.read().decode("utf-8"))
         value = payload.get(appid, {}).get("data", {}).get("name")
         name = safe_name(value) if isinstance(value, str) and value.strip() else None
@@ -121,7 +122,16 @@ def _fetch_steam_game_name(appid: str) -> str | None:
     return name
 
 
+_STEAM_ROOTS_CACHE: list[Path] | None = None
+
+
 def _steam_roots() -> list[Path]:
+    """Steam installation roots plus library folders; read once per process —
+    the registry and libraryfolders.vdf never change mid-session, and the scan
+    used to re-read them for every unresolved game."""
+    global _STEAM_ROOTS_CACHE
+    if _STEAM_ROOTS_CACHE is not None:
+        return _STEAM_ROOTS_CACHE
     roots: list[Path] = []
     for base in (os.environ.get("PROGRAMFILES(X86)"), os.environ.get("PROGRAMFILES"), os.environ.get("LOCALAPPDATA")):
         if base:
@@ -135,7 +145,8 @@ def _steam_roots() -> list[Path]:
             continue
         for value in re.findall(r'"path"\s+"((?:[^"\\]|\\.)*)"', text, re.IGNORECASE):
             libraries.append(Path(_unescape_vdf(value)))
-    return list(dict.fromkeys(libraries))
+    _STEAM_ROOTS_CACHE = list(dict.fromkeys(libraries))
+    return _STEAM_ROOTS_CACHE
 
 
 def _metadata_json_files(folder: Path) -> list[Path]:
