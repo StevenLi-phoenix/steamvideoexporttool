@@ -64,18 +64,21 @@ Python, Qt, FFmpeg, and ffprobe.
 
 For a large library with insufficient free space to duplicate everything at
 once, use the sequential migration script. It exports one recording at a time
-to `D:\Videos\Steam\exports`, verifies the resulting MP4 segments with FFprobe,
-then deletes only that recording's original source folder before starting the
-next one.
+with the same verified pipeline as the app, then deletes only that recording's
+original source folder before starting the next one.
+
+By default it reads `%USERPROFILE%\Videos\Steam\video` and writes to
+`%USERPROFILE%\Videos\Steam\exports`; pass `--source` / `--output` to override.
 
 > Warning: this permanently deletes the original Steam recording fragments
-> after verification. Confirm that `D:\Videos\Steam\exports` is the intended
-> destination before running it.
+> after verification. Confirm the destination folder before running it.
 
 ```powershell
 uv run python -m scripts.export_library_and_prune --delete-sources
+# Custom locations:
+uv run python -m scripts.export_library_and_prune --delete-sources --source "D:\Videos\Steam" --output "E:\Exports"
 ```
 
-It stops on any failed preflight, remux, or duration verification, leaving the
-current source recording intact. Progress is written to
-`D:\Videos\Steam\exports\export-and-prune.log`.
+Each exported recording gets a `verification-<recording>.json` report. It
+stops on any failed remux or verification, leaving the current source
+recording intact.

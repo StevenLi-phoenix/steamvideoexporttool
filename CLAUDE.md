@@ -23,11 +23,10 @@ The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, o
 - `steam_exporter/simple_ui.py` is the current GUI. Scans and previews run in Qt jobs; export work is delegated to `ExportClient`.
 - `steam_exporter/export_client.py` starts export in a spawned process and communicates over a pipe, keeping the GUI responsive and allowing cancellation.
 - `steam_exporter/export_backend.py` is the Qt-free subprocess entry point.
-- `scripts/export_game.py` probes sources, remuxes with FFmpeg, splits files at the strict decimal 64 GB cap when necessary, verifies duration and streams, and writes `verification.json`.
-- `steam_exporter/media.py` provides FFmpeg discovery, Steam game-name resolution, recording discovery, previews, and shared media helpers.
-- `steam_exporter/models.py` contains plain data models and conversion errors.
+- `scripts/export_game.py` is the single export pipeline shared by the GUI and the batch script: it probes sources, remuxes with FFmpeg, splits files at the strict decimal 64 GB cap when necessary, verifies duration and streams, writes `verification.json`, and exposes `process_recording`/`publish`/`discard_staging` for reuse.
+- `steam_exporter/media.py` provides FFmpeg discovery, Steam library roots and game-name resolution, previews, and shared media helpers (`safe_name`, `recording_timestamp`, `unique_path`, `ConversionError`).
 
-Source `.m4s` recordings are never deleted by the app. The separate `scripts/export_library_and_prune.py` command is destructive and requires the explicit `--delete-sources` flag; treat changes to it as high risk.
+Source `.m4s` recordings are never deleted by the app. The separate `scripts/export_library_and_prune.py` command is destructive and requires the explicit `--delete-sources` flag; it reuses the `export_game.py` pipeline one recording at a time and treats changes as high risk.
 
 Coverage focuses on testable logic; Qt and subprocess wiring are checked separately by `scripts/check_export_ipc.py`. Use `subprocess.CREATE_NO_WINDOW` for FFmpeg calls, sanitize paths with `safe_name()`, and use `steam://open/screenshots` for the recordings manager.
 
