@@ -16,7 +16,7 @@ uv run --group test coverage report --fail-under=80
 .\build-quick.ps1
 ```
 
-The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, on `PATH`, or through `FFMPEG_PATH`. `scripts\get-ffmpeg.ps1` downloads the pinned, SHA-256-verified FFmpeg into `dist\`, and `build-quick.ps1` embeds those binaries; both CI and release workflows share the same `.github/actions/build-app` composite action.
+The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, on `PATH`, or through `FFMPEG_PATH`. `scripts\get-ffmpeg.ps1` downloads the pinned, SHA-256-verified FFmpeg into `dist\`; `build-quick.ps1` embeds those binaries only with `-BundleFFmpeg` (plain local builds rely on the PATH ffmpeg). Both CI and release workflows share the same `.github/actions/build-app` composite action, which passes `-BundleFFmpeg`.
 
 ## Architecture
 

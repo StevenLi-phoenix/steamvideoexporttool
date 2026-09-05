@@ -4,8 +4,8 @@
   <img src="assets/app-screenshot-quick.png" alt="Steam Quick Export application window" width="960">
 </p>
 
-Losslessly remux Steam Game Recording footage into MP4, MOV, or FLV — no
-re-encoding, so quality and sync are identical to the original capture.
+Losslessly remux Steam Game Recording footage into MP4 — no re-encoding, so
+quality and sync are identical to the original capture.
 
 Steam Quick Export ("Steam 录制") is the Windows app. It automatically finds
 your Steam library and recordings; no folder or AppID entry is needed.
@@ -37,7 +37,7 @@ uv run python .\steam_quick_export.py
 
 Run `uv run python steam_quick_export.py`, or launch the packaged
 `SteamQuickExport.exe`. Click a game, check the recordings you want, click one
-for a first-frame preview, hit export. **Source recordings are never deleted
+for a four-frame preview, hit export. **Source recordings are never deleted
 by this app.** Output defaults to your Windows Videos folder under
 `exported/<game>/`.
 
@@ -63,11 +63,13 @@ by this app.** Output defaults to your Windows Videos folder under
 
 ```powershell
 .\scripts\get-ffmpeg.ps1   # fetches the pinned, hash-verified FFmpeg into dist\
-.\build-quick.ps1
+.\build-quick.ps1 -BundleFFmpeg
 ```
 
 Keep the entire `dist-simple\SteamQuickExport\` folder together — it bundles
-Python, Qt, FFmpeg, and ffprobe.
+Python, Qt, FFmpeg, and ffprobe. A plain `.\build-quick.ps1` (without the
+flag) produces a much smaller build that finds FFmpeg on `PATH` (or via
+`FFMPEG_PATH`) at runtime instead.
 
 ## Exporting a whole library and deleting source fragments
 
