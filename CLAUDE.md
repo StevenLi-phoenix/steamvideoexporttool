@@ -15,7 +15,7 @@ uv run --group test coverage report --fail-under=80
 .\build-quick.ps1
 ```
 
-The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, on `PATH`, or through `FFMPEG_PATH`. The build script embeds binaries from `dist\ffmpeg.exe` and `dist\ffprobe.exe`.
+The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, on `PATH`, or through `FFMPEG_PATH`. The build script uses `uv run` and embeds binaries from `dist\ffmpeg.exe` and `dist\ffprobe.exe`.
 
 ## Architecture
 
