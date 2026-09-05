@@ -20,7 +20,7 @@ runs:
       run: .\scripts\get-ffmpeg.ps1
     - name: Build Steam Quick Export
       shell: pwsh
-      run: .\build-quick.ps1
+      run: .\build-quick.ps1 -BundleFFmpeg
     - name: Smoke-test Steam Quick Export bundle
       shell: pwsh
       run: |

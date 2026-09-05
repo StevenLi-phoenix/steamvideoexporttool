@@ -13,7 +13,7 @@ uv run --group test coverage report                          # fail_under=80
 uv run --group lint ruff check .                             # E/F/W/I/B/UP, line-length 140
 uv run --group lint ruff format .
 .\scripts\get-ffmpeg.ps1                                     # pinned FFmpeg 7.1.1 -> dist\ (SHA-256 verified)
-.\build-quick.ps1                                            # PyInstaller -> dist-simple\SteamQuickExport\
+.\build-quick.ps1                                            # PyInstaller -> dist-simple\SteamQuickExport\ (local: no bundled FFmpeg, uses PATH; -BundleFFmpeg embeds dist\ binaries like CI)
 uv run python steam_quick_export.py --self-test --scan-self-test   # smoke test
 ```
 
@@ -64,8 +64,14 @@ ruff + the full suite, so commits take a minute).
   `http_proxy https_proxy all_proxy` (the VPN is TUN-based).
 - `store.steampowered.com` is blocked in China; game-name web resolution falls
   back to local ACF manifests. Don't rely on Steam API reachability in tests.
-- `dist\` is the FFmpeg staging dir consumed by `build-quick.ps1`;
+- `dist\` is the pinned-FFmpeg staging dir, embedded only with
+  `build-quick.ps1 -BundleFFmpeg` (CI/release); local personal builds rely on
+  the PATH ffmpeg (`find_executable` falls back to `shutil.which`).
   `dist-simple\` is the build output. Both git-ignored.
+- **Shortcut contract**: the user launches the app via
+  `D:\Videos\Steam 录制导出.lnk`, which targets
+  `dist-simple\SteamQuickExport\SteamQuickExport.exe`. Keep that output path
+  stable across build-script/refactor changes so the shortcut keeps working.
 - Release flow: tag `v*` must match `version` in `pyproject.toml` (workflow
   verifies); release re-runs are idempotent (`gh release upload --clobber`).
 - Read `CLAUDE.md` before touching the export pipeline or the prune script —
