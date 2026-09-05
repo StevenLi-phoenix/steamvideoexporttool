@@ -1,7 +1,7 @@
 # Steam Video Exporter
 
 <p align="center">
-  <img src="assets/app-screenshot.png" alt="Steam Video Exporter application window" width="960">
+  <img src="assets/app-screenshot-quick.png" alt="Steam Quick Export application window" width="960">
 </p>
 
 Losslessly remux Steam Game Recording footage into MP4, MOV, or FLV — no
@@ -67,10 +67,6 @@ Available tokens: `{game}`, `{source}`, `{date}` (`YYYY-MM-DD`), `{time}`
 (`HH-MM-SS`), `{index}` (`001`, `002`, ...), `{ext}`.
 
 ## Steam Quick Export ("Steam 录制", automatic, Chinese UI)
-
-<p align="center">
-  <img src="assets/app-screenshot-quick.png" alt="Steam Quick Export application window" width="960">
-</p>
 
 Run `uv run python steam_quick_export.py`, or launch the packaged
 `SteamQuickExport.exe`. Click a game, check the recordings you want, click one

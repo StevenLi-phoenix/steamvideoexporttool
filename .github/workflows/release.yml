@@ -33,8 +33,10 @@ jobs:
       - name: Smoke-test Steam Quick Export bundle
         shell: pwsh
         run: |
-          & .\dist-simple\SteamQuickExport\SteamQuickExport.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw "Steam Quick Export self-test failed ($LASTEXITCODE)" }
+          # `&` does not reliably surface $LASTEXITCODE for this windowed exe;
+          # Start-Process -Wait -PassThru does.
+          $process = Start-Process -FilePath ".\dist-simple\SteamQuickExport\SteamQuickExport.exe" -ArgumentList "--self-test" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "Steam Quick Export self-test failed ($($process.ExitCode))" }
       - name: Package release files
         shell: pwsh
         run: |
