@@ -21,8 +21,6 @@ default-groups = ["build"]
 [tool.coverage.run]
 source = ["steam_exporter"]
 omit = [
-    "steam_exporter/ui.py",
-    "steam_exporter/worker.py",
     "steam_exporter/simple_ui.py",
     "steam_exporter/export_client.py",
     "steam_exporter/export_backend.py",

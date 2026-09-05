@@ -1,3 +1,3 @@
-"""Steam Video Exporter application package."""
+"""Steam Quick Export application package."""
 
-__all__ = ["media", "models", "ui", "worker"]
+__all__ = ["media", "models", "library", "simple_ui", "export_client", "export_backend"]

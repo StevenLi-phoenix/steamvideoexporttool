@@ -1,1 +1,1 @@
-"""Test package for Steam Video Exporter."""
+"""Tests for Steam Quick Export."""

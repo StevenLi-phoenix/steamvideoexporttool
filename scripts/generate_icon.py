@@ -1,4 +1,4 @@
-"""One-off generator for assets/app-icon.ico (used by build.ps1 / build-quick.ps1).
+"""One-off generator for assets/app-icon.ico (used by build-quick.ps1).
 
 Run with Pillow available but without adding it as a project dependency:
 

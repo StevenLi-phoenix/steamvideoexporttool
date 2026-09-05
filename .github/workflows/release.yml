@@ -26,8 +26,6 @@ jobs:
           $bin = (Get-ChildItem $extractRoot -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
           Copy-Item (Join-Path $bin "ffmpeg.exe") .\ffmpeg.exe
           Copy-Item (Join-Path $bin "ffprobe.exe") .\ffprobe.exe
-      - name: Build Steam Video Exporter
-        run: powershell -ExecutionPolicy Bypass -File .\build.ps1
       - name: Build Steam Quick Export
         run: powershell -ExecutionPolicy Bypass -File .\build-quick.ps1
       - name: Smoke-test Steam Quick Export bundle
@@ -42,11 +40,6 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
 
-          # Steam Video Exporter: bundled-FFmpeg build, and an exe-only build for
-          # users who already have ffmpeg/ffprobe on PATH or via FFMPEG_PATH.
-          Compress-Archive -Path .\dist\SteamVideoExporter.exe, .\dist\ffmpeg.exe, .\dist\ffprobe.exe -DestinationPath ".\SteamVideoExporter-$tag-win-x64-ffmpeg.zip"
-          Compress-Archive -Path .\dist\SteamVideoExporter.exe -DestinationPath ".\SteamVideoExporter-$tag-win-x64.zip"
-
           # Steam Quick Export: same idea, but ffmpeg.exe/ffprobe.exe are plain
           # files inside the onedir bundle, so the no-ffmpeg variant is just a
           # copy of that folder with the two binaries stripped out.
@@ -60,8 +53,6 @@ jobs:
         with:
           name: windows-builds-${{ github.ref_name }}
           path: |
-            SteamVideoExporter-${{ github.ref_name }}-win-x64-ffmpeg.zip
-            SteamVideoExporter-${{ github.ref_name }}-win-x64.zip
             SteamQuickExport-${{ github.ref_name }}-win-x64-ffmpeg.zip
             SteamQuickExport-${{ github.ref_name }}-win-x64.zip
       - name: Publish GitHub Release
@@ -71,9 +62,7 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $assets = @(
-            "SteamVideoExporter-$tag-win-x64-ffmpeg.zip",
-            "SteamVideoExporter-$tag-win-x64.zip",
             "SteamQuickExport-$tag-win-x64-ffmpeg.zip",
             "SteamQuickExport-$tag-win-x64.zip"
           )
-          gh release create "$tag" @assets --title "Steam Video Exporter $tag" --generate-notes
+          gh release create "$tag" @assets --title "Steam Quick Export $tag" --generate-notes

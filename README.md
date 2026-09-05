@@ -1,4 +1,4 @@
-# Steam Video Exporter
+# Steam Quick Export
 
 <p align="center">
   <img src="assets/app-screenshot-quick.png" alt="Steam Quick Export application window" width="960">
@@ -7,66 +7,33 @@
 Losslessly remux Steam Game Recording footage into MP4, MOV, or FLV — no
 re-encoding, so quality and sync are identical to the original capture.
 
-Two Windows GUIs, pick whichever fits you:
-
-- **Steam Video Exporter** — English UI, manual: point it at an input folder
-  (a single recording or a whole library) and an output folder.
-- **Steam Quick Export** ("Steam 录制") — Chinese UI, automatic: finds your
-  whole Steam library and every game's recordings on its own, no folder or
-  AppID entry needed.
+Steam Quick Export ("Steam 录制") is the Windows app. It automatically finds
+your Steam library and recordings; no folder or AppID entry is needed.
 
 > Looking for architecture, internals, or contributor notes instead? See
 > [CLAUDE.md](CLAUDE.md).
 
 ## Downloads
 
-Grab the latest build from [Releases](../../releases). Each app ships as two
-zips per version:
+Grab the latest build from [Releases](../../releases). Each version ships as
+two zips:
 
 - **`...-win-x64-ffmpeg.zip`** — includes FFmpeg/ffprobe, works out of the box.
 - **`...-win-x64.zip`** — smaller, for when you already have FFmpeg on `PATH`
   or want to supply your own.
 
-## Steam Video Exporter (manual, English UI)
-
-Point it at a single recording folder or a library root such as
-`D:\Videos\Steam` and it groups recordings automatically so unrelated
-sessions are never mixed together.
-
-- Resolves the real game name (from Steam metadata, not the folder name).
-- Checkable batch list with Select all / Clear all, and a first-frame preview.
-- MP4, MOV, or FLV output, with 16 GB, 64 GB, or custom maximum segment sizes.
-- Custom output folder and filename tokens.
-- Preflight checks (source, FFmpeg, output folder, free disk space) before you convert.
-
-### Run from source
+## Run from source
 
 1. Install Python 3.10+ and [uv](https://docs.astral.sh/uv/) on Windows.
-2. Put `ffmpeg.exe` (and preferably `ffprobe.exe`) beside `steam_video_exporter.py`,
-   or add FFmpeg to `PATH`.
+2. Put `ffmpeg.exe` (and preferably `ffprobe.exe`) beside the app, or add
+   FFmpeg to `PATH`.
 3. Run with uv (the project environment is created automatically):
 
 ```powershell
-uv run python .\steam_video_exporter.py
+uv run python .\steam_quick_export.py
 ```
 
-### Package as a standalone EXE
-
-```powershell
-.\build.ps1
-```
-
-Keep the resulting `SteamVideoExporter.exe`, `ffmpeg.exe`, and `ffprobe.exe`
-(all in `dist\`) together when moving the app around.
-
-### Filename tokens
-
-Default pattern: `{game}_{date}_{time}_part{index}.{ext}`.
-
-Available tokens: `{game}`, `{source}`, `{date}` (`YYYY-MM-DD`), `{time}`
-(`HH-MM-SS`), `{index}` (`001`, `002`, ...), `{ext}`.
-
-## Steam Quick Export ("Steam 录制", automatic, Chinese UI)
+## Steam Quick Export ("Steam 录制")
 
 Run `uv run python steam_quick_export.py`, or launch the packaged
 `SteamQuickExport.exe`. Click a game, check the recordings you want, click one

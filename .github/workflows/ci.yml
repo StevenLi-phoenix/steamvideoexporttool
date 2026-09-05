@@ -39,8 +39,6 @@ jobs:
           $bin = (Get-ChildItem $extractRoot -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
           Copy-Item (Join-Path $bin "ffmpeg.exe") .\ffmpeg.exe
           Copy-Item (Join-Path $bin "ffprobe.exe") .\ffprobe.exe
-      - name: Build Steam Video Exporter
-        run: powershell -ExecutionPolicy Bypass -File .\build.ps1
       - name: Build Steam Quick Export
         run: powershell -ExecutionPolicy Bypass -File .\build-quick.ps1
       - name: Smoke-test Steam Quick Export bundle
