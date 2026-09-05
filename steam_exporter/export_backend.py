@@ -18,7 +18,18 @@ def run_export(arguments, sender):
             output /= datetime.now().strftime("export_%Y%m%d_%H%M%S_%f")
         arguments[index] = str(output)
         sender.send(("log", tr("backend_checking")))
-        export_game(arguments, lambda message: sender.send(("log", message)))
+
+        last_step = -1
+
+        def progress(fraction):
+            # Throttle to 0.1% steps so a chatty FFmpeg cannot flood the pipe.
+            nonlocal last_step
+            step = int(fraction * 1000)
+            if step != last_step:
+                last_step = step
+                sender.send(("progress", fraction))
+
+        export_game(arguments, lambda message: sender.send(("log", message)), progress=progress)
         sender.send(("done", str(output)))
     except BaseException as exc:
         sender.send(("error", f"{type(exc).__name__}: {exc}"))

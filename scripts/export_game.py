@@ -37,28 +37,88 @@ def _probe(ffprobe: Path, path: Path) -> dict:
     return data
 
 
-def _remux(ffmpeg: Path, source: Path, target: Path, seconds: float | None = None) -> None:
-    command = [str(ffmpeg), "-nostdin", "-hide_banner", "-loglevel", "error", "-n", "-i", str(source), "-map", "0", "-c", "copy"]
+def _remux(
+    ffmpeg: Path,
+    source: Path,
+    target: Path,
+    seconds: float | None = None,
+    *,
+    total_duration: float | None = None,
+    on_progress=None,
+) -> None:
+    """Stream-copy remux. When total_duration and on_progress are given, FFmpeg's
+    machine-readable -progress feed on stdout drives on_progress(0..1)."""
+    command = [
+        str(ffmpeg),
+        "-nostdin",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostats",
+        "-n",
+        "-i",
+        str(source),
+        "-map",
+        "0",
+        "-c",
+        "copy",
+    ]
     if seconds is not None:
         command += ["-f", "segment", "-segment_time", str(seconds), "-reset_timestamps", "1"]
+    if on_progress is not None and total_duration:
+        # 20 Hz progress instead of the default 0.5 s cadence, so even short
+        # recordings stream several updates.
+        command += ["-progress", "pipe:1", "-stats_period", "0.05"]
     command.append(str(target))
-    result = subprocess.run(
-        command, capture_output=True, encoding="utf-8", errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    # stderr is merged into stdout: with -loglevel error it is nearly silent, so
+    # reading a single pipe cannot deadlock and its tail serves as the error text.
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
-    if result.returncode:
-        raise RuntimeError(tr("remux_failed", stderr=result.stderr[-4000:]))
+    assert process.stdout
+    noise: list[str] = []
+    try:
+        for line in process.stdout:
+            line = line.strip()
+            if on_progress is not None and total_duration and line.startswith("out_time_us="):
+                try:
+                    done_seconds = float(line.split("=", 1)[1]) / 1_000_000
+                except ValueError:
+                    continue  # "N/A" before the muxer reports
+                on_progress(max(0.0, min(1.0, done_seconds / total_duration)))
+            elif line:
+                noise.append(line)
+                del noise[:-100]
+    finally:
+        process.stdout.close()
+        returncode = process.wait()
+    if returncode:
+        raise RuntimeError(tr("remux_failed", stderr="\n".join(noise)[-4000:]))
 
 
 def process_recording(
-    folder: Path, staging: Path, ffmpeg: Path, ffprobe: Path, *, limit: int = LIMIT, log=print
+    folder: Path,
+    staging: Path,
+    ffmpeg: Path,
+    ffprobe: Path,
+    *,
+    limit: int = LIMIT,
+    log=print,
+    on_progress=None,
 ) -> list[tuple[Path, dict]]:
     """Stream-copy one bg_ recording folder into staging, split any part over the
-    strict size cap, and verify total duration and streams against the source."""
+    strict size cap, and verify total duration and streams against the source.
+    on_progress(fraction) tracks this recording's remux from 0 to 1."""
     manifest = folder / "session.mpd"
     original = _probe(ffprobe, manifest)
     source_duration = float(original["format"]["duration"])
     target = staging / f"{folder.name}.mp4"
-    _remux(ffmpeg, manifest, target)
+    _remux(ffmpeg, manifest, target, total_duration=source_duration, on_progress=on_progress)
     pending = [target]
     parts: list[tuple[Path, dict]] = []
     while pending:
@@ -70,7 +130,14 @@ def process_recording(
                 raise RuntimeError(tr("cannot_split"))
             split_dir = staging / (part.stem + "_split")
             split_dir.mkdir()
-            _remux(ffmpeg, part, split_dir / "%04d.mp4", seconds)
+            _remux(
+                ffmpeg,
+                part,
+                split_dir / "%04d.mp4",
+                seconds,
+                total_duration=float(data["format"]["duration"]),
+                on_progress=on_progress,
+            )
             children = sorted(split_dir.glob("*.mp4"))
             if len(children) < 2:
                 raise RuntimeError(tr("no_split"))
@@ -110,7 +177,9 @@ def discard_staging(staging: Path) -> None:
     staging.rmdir()
 
 
-def main(argv=None, log=print, limit=LIMIT):
+def main(argv=None, log=print, limit=LIMIT, progress=None):
+    """progress(fraction), when given, reports the whole task from 0 to 1 as
+    recordings finish and FFmpeg streams through each remux."""
     if sys.stdout is not None:
         sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser()
@@ -139,10 +208,29 @@ def main(argv=None, log=print, limit=LIMIT):
     staging.mkdir()
 
     entries: list[tuple[Path, dict, Path]] = []
+    reported = 0.0
+
+    def report(fraction, base=(0.0, 1.0)):
+        """Map a single recording's remux fraction onto the whole task; keep the
+        bar monotonic (a >64 GB split rewinds its step's fraction)."""
+        nonlocal reported
+        low, high = base
+        overall = min(1.0, low + (high - low) * max(0.0, min(1.0, fraction)))
+        if overall > reported:
+            reported = overall
+            if progress is not None:
+                progress(reported)
+
     for index, folder in enumerate(folders, 1):
         log(tr("progress", index=index, total=len(folders), folder=folder.name))
-        for part, data in process_recording(folder, staging, ffmpeg, ffprobe, limit=limit, log=log):
+        base = ((index - 1) / len(folders), index / len(folders))
+
+        def on_progress(fraction, base=base):
+            report(fraction, base)
+
+        for part, data in process_recording(folder, staging, ffmpeg, ffprobe, limit=limit, log=log, on_progress=on_progress):
             entries.append((part, data, folder))
+    report(1.0)
 
     report = [
         publish(part, data, args.output, args.game, folder, number, len(entries), limit=limit)

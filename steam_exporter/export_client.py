@@ -11,6 +11,7 @@ from .i18n import tr
 
 class ExportClient(QObject):
     message = Signal(str)
+    progress = Signal(float)
     completed = Signal(str)
     failed = Signal(str)
     finished = Signal()
@@ -61,13 +62,15 @@ class ExportClient(QObject):
                 if not self.receiver.poll():
                     break
                 try:
-                    kind, text = self.receiver.recv()
+                    kind, payload = self.receiver.recv()
                 except (EOFError, OSError):
                     break
                 if kind == "log":
-                    self.message.emit(text)
+                    self.message.emit(payload)
+                elif kind == "progress":
+                    self.progress.emit(float(payload))
                 else:
-                    self.outcome = kind, text
+                    self.outcome = kind, payload
         except (EOFError, OSError):
             pass
         if self.process.is_alive():
@@ -76,11 +79,13 @@ class ExportClient(QObject):
         if self.outcome is None:
             try:
                 if self.receiver.poll():
-                    kind, text = self.receiver.recv()
+                    kind, payload = self.receiver.recv()
                     if kind == "log":
-                        self.message.emit(text)
+                        self.message.emit(payload)
+                    elif kind == "progress":
+                        self.progress.emit(float(payload))
                     else:
-                        self.outcome = kind, text
+                        self.outcome = kind, payload
                     return
             except (EOFError, OSError):
                 pass

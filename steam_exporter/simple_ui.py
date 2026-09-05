@@ -84,6 +84,7 @@ class SimpleApp(QMainWindow):
         self._status = None
         self.export_client = ExportClient(self)
         self.export_client.message.connect(self.export_message)
+        self.export_client.progress.connect(self.export_progress)
         self.export_client.completed.connect(self.export_completed)
         self.export_client.failed.connect(self.error)
         self.export_client.finished.connect(self.export_finished)
@@ -553,6 +554,11 @@ class SimpleApp(QMainWindow):
         self.refresh_task_state()
         if next_task:
             self.start_task(next_task)
+
+    def export_progress(self, fraction):
+        """Real progress from FFmpeg's -progress feed, mapped over the whole task."""
+        self.progress.setRange(0, 1000)
+        self.progress.setValue(max(1, int(fraction * 1000)))
 
     def export_message(self, message):
         self.log.appendPlainText(message)

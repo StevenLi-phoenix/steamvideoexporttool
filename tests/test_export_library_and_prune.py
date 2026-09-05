@@ -29,6 +29,7 @@ class PruneScriptTests(unittest.TestCase):
         self.media = FakeMedia()
         self.patchers = [
             patch.object(export_game.subprocess, "run", side_effect=self.media.run),
+            patch.object(export_game.subprocess, "Popen", side_effect=self.media.popen),
             patch.object(prune, "find_executable", side_effect=lambda name, ffmpeg_path=None: Path(f"{name}.exe")),
             patch.object(prune, "LIMIT", 1000),
             patch.object(prune, "resolve_game_name", return_value="Portal 2"),

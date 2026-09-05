@@ -7,6 +7,7 @@ split/verify/publish logic runs for real.
 
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import unittest
@@ -24,6 +25,19 @@ set_language("en", persist=False)
 STREAMS = [{"codec_type": "video", "codec_name": "h264"}, {"codec_type": "audio", "codec_name": "aac"}]
 
 
+class FakeProcess:
+    """Stand-in for subprocess.Popen: stdout feeds FFmpeg -progress lines.
+
+    The leading N/A line exercises the parser's tolerance for pre-mux output."""
+
+    def __init__(self, output: str = "out_time_us=N/A\nout_time_us=50000000\nprogress=end\n", returncode: int = 0):
+        self.stdout = io.StringIO(output)
+        self.returncode = returncode
+
+    def wait(self):
+        return self.returncode
+
+
 class FakeMedia:
     """Fake ffprobe (canned JSON per path) + ffmpeg remux (writes real files)."""
 
@@ -39,6 +53,9 @@ class FakeMedia:
             "format": {"duration": str(duration)},
         }
 
+    def _source(self, command) -> Path:
+        return Path(command[[i for i, token in enumerate(command) if token == "-i"][0] + 1])
+
     def run(self, command, **kwargs):
         self.calls.append(command)
         if Path(command[0]).name.startswith("ffprobe"):
@@ -46,8 +63,12 @@ class FakeMedia:
             if path not in self.probe_data:
                 return SimpleNamespace(returncode=1, stdout="", stderr=f"Invalid data found when processing input: {path}")
             return SimpleNamespace(returncode=0, stdout=json.dumps(self.probe_data[path]), stderr="")
+        raise AssertionError("remux must go through subprocess.Popen")
+
+    def popen(self, command, **kwargs):
+        self.calls.append(command)
         target = Path(command[-1])
-        source = Path(command[[i for i, token in enumerate(command) if token == "-i"][0] + 1])
+        source = self._source(command)
         if "%04d" in target.name:  # segment split of an oversized part
             parent_duration = float(self.probe_data[str(source)]["format"]["duration"])
             for child_index in range(self.split_children):
@@ -57,7 +78,7 @@ class FakeMedia:
         else:
             target.write_bytes(b"x" * 8)
             self.register(target, 100.0)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        return FakeProcess()
 
 
 def make_recording(root: Path, name="bg_620_20260725_104500") -> Path:
@@ -79,6 +100,7 @@ class ExportGameTests(unittest.TestCase):
         self.media.register(self.source / "session.mpd", 100.0)
         self.patchers = [
             patch.object(export_game.subprocess, "run", side_effect=self.media.run),
+            patch.object(export_game.subprocess, "Popen", side_effect=self.media.popen),
             # Keep the tests hermetic: no dependence on a real FFmpeg on PATH.
             patch.object(export_game, "find_executable", side_effect=lambda name, ffmpeg_path=None: Path(f"{name}.exe")),
         ]
@@ -86,11 +108,12 @@ class ExportGameTests(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def run_main(self, limit=1000, recording=None):
+    def run_main(self, limit=1000, recording=None, progress=None):
         export_game.main(
             ["--source", str(self.source.parent), "--output", str(self.output), "--appid", "620", "--game", "Portal 2"] + (recording or []),
             log=lambda message: None,
             limit=limit,
+            progress=progress,
         )
 
     def test_remux_publishes_verified_output_and_writes_report(self):
@@ -166,6 +189,19 @@ class ExportGameTests(unittest.TestCase):
         with self.assertRaises(RuntimeError) as raised:
             self.run_main()
         self.assertIn("Missing video", str(raised.exception))
+
+    def test_progress_callback_tracks_remux_across_the_task(self):
+        collected: list[float] = []
+        self.run_main(progress=collected.append)
+        # FakeMedia emits out_time_us=50s on a 100s recording -> 0.5, then the
+        # pipeline finishes the task at 1.0. Monotonic and bounded:
+        self.assertEqual(collected, [0.5, 1.0])
+        self.assertTrue(all(0.0 <= value <= 1.0 for value in collected))
+
+    def test_remux_failure_surfaces_ffmpeg_output(self):
+        with patch.object(export_game.subprocess, "Popen", return_value=FakeProcess(output="", returncode=1)):
+            with self.assertRaises(RuntimeError):
+                self.run_main()
 
     def test_no_recordings_for_appid_is_rejected(self):
         with self.assertRaises(RuntimeError) as raised:

@@ -24,8 +24,9 @@ follows [Keep a Changelog](https://keepachangelog.com/) and the project uses
 
 ### Changed
 
-- Export progress is now parsed from pipeline messages and shown as a real
-  percentage (previously an indeterminate spinner for the whole export).
+- **Real export progress**: the progress bar now streams FFmpeg's own
+  `-progress` feed (20 Hz) mapped over the whole task — recording count plus
+  in-recording percentage — instead of an indeterminate spinner.
 - Sizes in the recording list use adaptive units (KB/MB/GB) instead of always
   GB.
 
