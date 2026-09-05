@@ -10,6 +10,11 @@ follows [Keep a Changelog](https://keepachangelog.com/) and the project uses
 
 ### Added
 
+- **Export task queue**: while one game is exporting, other games can be
+  queued with "Queue export"; tasks run automatically one by one. Queued or
+  running recordings are locked (their checkboxes are disabled) so the same
+  footage cannot be triggered twice; a queued game can be removed from the
+  queue via right-click, and completed rows are unchecked automatically.
 - **Chinese/English UI**: a language toggle in the header switches the whole
   interface (and the export pipeline's log messages) instantly; the choice is
   auto-detected from the system locale and persisted. CLI accepts `--lang`.

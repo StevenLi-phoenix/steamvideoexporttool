@@ -51,6 +51,10 @@ by this app.** Output defaults to your Windows Videos folder under
   you can delete captures through Steam; click Refresh afterward.
 - Exporting runs in the background, so the library stays browsable and you
   can cancel an export at any time without closing the app.
+- **Export queue**: while one game exports, click "Queue export" on another
+  game to line it up; tasks run one by one automatically. Queued recordings
+  are locked against double-triggering, and you can right-click a queued game
+  to remove it from the queue.
 - Output is MP4 via stream copy, capped at 64 GB per file (larger recordings
   are split automatically), and each export writes a `verification.json`
   confirming durations and codecs matched the source.

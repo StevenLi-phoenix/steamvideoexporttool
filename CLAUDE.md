@@ -21,6 +21,7 @@ The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, o
 ## Architecture
 
 - `steam_exporter/library.py` scans Steam libraries and caches recording metadata.
+- `steam_exporter/taskqueue.py` is the testable FIFO export queue: one export runs at a time, recordings stay locked while queued/running, and the GUI renders its state (badges, locked rows, queue strip).
 - `steam_exporter/simple_ui.py` is the current GUI. Scans and previews run in Qt jobs; export work is delegated to `ExportClient`.
 - `steam_exporter/export_client.py` starts export in a spawned process and communicates over a pipe, keeping the GUI responsive and allowing cancellation.
 - `steam_exporter/export_backend.py` is the Qt-free subprocess entry point.

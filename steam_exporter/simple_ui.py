@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QPlainTextEdit,
     QProgressBar,
@@ -38,6 +39,7 @@ from .i18n import current_language, normalize_language, set_language, tr
 from .library import scan_library
 from .media import extract_preview_frames, find_executable, format_bytes, recording_timestamp, resource_path, safe_name
 from .settings import load_settings, update_settings
+from .taskqueue import ExportTask, TaskQueue
 
 _PROGRESS = re.compile(r"^\[(\d+)/(\d+)\]")
 
@@ -86,7 +88,9 @@ class SimpleApp(QMainWindow):
         self.export_client.failed.connect(self.error)
         self.export_client.finished.connect(self.export_finished)
         self.working = False
+        self.tasks = TaskQueue()
         self.games = QListWidget()
+        self.games.setContextMenuPolicy(Qt.CustomContextMenu)
         self.recordings = QTreeWidget()
         self.recordings.setRootIsDecorated(False)
         self.recordings.setColumnWidth(0, 300)
@@ -133,6 +137,10 @@ class SimpleApp(QMainWindow):
         self.output_label = QLabel()
         self.output_label.setWordWrap(True)
         self.update_output()
+        self.queue_label = QLabel()
+        self.queue_label.setWordWrap(True)
+        self.queue_label.setStyleSheet("color: #666;")
+        self.queue_label.hide()
         body = QWidget()
         layout = QVBoxLayout(body)
         layout.setContentsMargins(24, 22, 24, 20)
@@ -165,6 +173,7 @@ class SimpleApp(QMainWindow):
         splitter.setSizes([270, 700])
         layout.addWidget(splitter, 1)
         layout.addWidget(self.output_label)
+        layout.addWidget(self.queue_label)
         footer = QHBoxLayout()
         for button in [self.destination, self.open_output, self.logs]:
             footer.addWidget(button)
@@ -189,6 +198,7 @@ class SimpleApp(QMainWindow):
         self.destination.clicked.connect(self.choose_output)
         self.language.clicked.connect(self.toggle_language)
         self.games.currentItemChanged.connect(self.show_game)
+        self.games.customContextMenuRequested.connect(self.games_context_menu)
         self.recordings.itemChanged.connect(self.selection_changed)
         self.recordings.currentItemChanged.connect(self.show_preview)
         self.select_all.clicked.connect(lambda: self.check_all(True))
@@ -231,6 +241,7 @@ class SimpleApp(QMainWindow):
             item = self.games.item(index)
             appid, name, rows = item.data(Qt.UserRole)
             item.setText(f"{name}\n{tr('recordings_count', count=len(rows))}")
+        self.refresh_queue_strip()
         current = self.games.currentItem()
         if current is not None:
             appid, name, rows = current.data(Qt.UserRole)
@@ -248,7 +259,7 @@ class SimpleApp(QMainWindow):
             key, kwargs = self._status
             self.status.setText(tr(key, **kwargs))
         self.update_output()
-        self.selection_changed()
+        self.refresh_task_state()
 
     def update_output(self):
         self.output_label.setText(tr("output_label", output=self.output))
@@ -378,23 +389,71 @@ class SimpleApp(QMainWindow):
             row.setData(0, Qt.UserRole, str(folder))
             row.setCheckState(0, Qt.Checked)
             self.recordings.addTopLevelItem(row)
-        self.selection_changed()
+        self.refresh_task_state()
 
     def selected(self):
         return [
             self.recordings.topLevelItem(i).data(0, Qt.UserRole)
             for i in range(self.recordings.topLevelItemCount())
-            if self.recordings.topLevelItem(i).checkState(0) == Qt.Checked
+            if self.recordings.topLevelItem(i).checkState(0) == Qt.Checked and not self.recordings.topLevelItem(i).isDisabled()
         ]
 
     def selection_changed(self, *args):
         count = len(self.selected())
-        self.start.setText(tr("btn_export", count=count))
+        queued_mode = self.tasks.running is not None or bool(self.tasks.pending)
+        self.start.setText(tr("btn_queue" if queued_mode else "btn_export", count=count))
         self.start.setEnabled(count > 0 and not self.working)
 
     def check_all(self, checked):
         for i in range(self.recordings.topLevelItemCount()):
-            self.recordings.topLevelItem(i).setCheckState(0, Qt.Checked if checked else Qt.Unchecked)
+            row = self.recordings.topLevelItem(i)
+            if not row.isDisabled():
+                row.setCheckState(0, Qt.Checked if checked else Qt.Unchecked)
+
+    def refresh_task_state(self):
+        """Sync badges, locked rows, and the queue strip with the task queue."""
+        locked = self.tasks.lock_paths()
+        for index in range(self.games.count()):
+            item = self.games.item(index)
+            appid, name, rows = item.data(Qt.UserRole)
+            badge = ""
+            if self.tasks.running and self.tasks.running.appid == appid:
+                badge = tr("badge_exporting")
+            elif any(task.appid == appid for task in self.tasks.pending):
+                badge = tr("badge_queued")
+            text = f"{name}\n{tr('recordings_count', count=len(rows))}"
+            if badge:
+                text += f" · {badge}"
+            item.setText(text)
+        for i in range(self.recordings.topLevelItemCount()):
+            row = self.recordings.topLevelItem(i)
+            row.setDisabled(row.data(0, Qt.UserRole) in locked)
+        self.refresh_queue_strip()
+        self.selection_changed()
+
+    def refresh_queue_strip(self):
+        if not self.tasks.pending:
+            self.queue_label.hide()
+            return
+        items = "、".join(
+            tr("queue_item", index=index, game=task.game, count=len(task.recordings)) for index, task in enumerate(self.tasks.pending, 1)
+        )
+        self.queue_label.setText(tr("queue_strip", tasks=items))
+        self.queue_label.setToolTip(tr("queue_remove_hint"))
+        self.queue_label.show()
+
+    def games_context_menu(self, pos):
+        item = self.games.itemAt(pos)
+        if not item:
+            return
+        appid, name, _ = item.data(Qt.UserRole)
+        if not any(task.appid == appid for task in self.tasks.pending):
+            return
+        menu = QMenu(self)
+        remove = menu.addAction(tr("context_remove"))
+        if menu.exec(self.games.mapToGlobal(pos)) == remove:
+            self.tasks.remove_game(appid)
+            self.refresh_task_state()
 
     def show_preview(self, item, previous=None):
         if not item or (self.preview_job and self.preview_job.isRunning()):
@@ -435,12 +494,32 @@ class SimpleApp(QMainWindow):
         if not item or not selected:
             return
         appid, game, _ = item.data(Qt.UserRole)
-        output = self.output / safe_name(game)
-        args = ["--source", str(self.source), "--output", str(output), "--appid", appid, "--game", game]
-        for folder in selected:
-            args += ["--recording", Path(folder).name]
+        locked = self.tasks.lock_paths()
+        paths = [folder for folder in selected if folder not in locked]
+        if not paths:
+            self.set_status("already_queued")
+            return
+        task = ExportTask(
+            appid=appid,
+            game=game,
+            recordings=[Path(folder).name for folder in paths],
+            paths=paths,
+        )
+        if self.tasks.running is None:
+            self.start_task(task)
+        else:
+            self.tasks.enqueue(task)
+            self.set_status("task_queued", game=game, count=len(paths))
+            self.refresh_task_state()
+
+    def start_task(self, task):
+        self.tasks.running = task
+        output = self.output / safe_name(task.game)
+        args = ["--source", str(self.source), "--output", str(output), "--appid", task.appid, "--game", task.game]
+        for recording in task.recordings:
+            args += ["--recording", recording]
         self.log.clear()
-        self.set_status("status_exporting", count=len(selected))
+        self.set_status("status_exporting", count=len(task.recordings))
         self.busy(True)
         # Library browsing stays usable while the snapshot of selected paths exports.
         for widget in [self.games, self.recordings, self.select_all, self.select_none]:
@@ -448,6 +527,7 @@ class SimpleApp(QMainWindow):
         self.export_client.start(args)
         self.cancel.setVisible(True)
         self.cancel.setEnabled(True)
+        self.refresh_task_state()
 
     def cancel_export(self):
         if self.export_client.isRunning():
@@ -457,10 +537,22 @@ class SimpleApp(QMainWindow):
             self.export_client.cancel()
 
     def export_finished(self):
+        finished_paths = set(self.tasks.running.paths) if self.tasks.running else set()
+        self.tasks.finish()
         self.busy(False)
+        # Uncheck the rows that just completed so the same task is not re-queued by accident.
+        for i in range(self.recordings.topLevelItemCount()):
+            row = self.recordings.topLevelItem(i)
+            if row.data(0, Qt.UserRole) in finished_paths:
+                row.setCheckState(0, Qt.Unchecked)
         if self.close_after_cancel:
             self.close_after_cancel = False
             self.close()
+            return
+        next_task = self.tasks.take_next()
+        self.refresh_task_state()
+        if next_task:
+            self.start_task(next_task)
 
     def export_message(self, message):
         self.log.appendPlainText(message)
