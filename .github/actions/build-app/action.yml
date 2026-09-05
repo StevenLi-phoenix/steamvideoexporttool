@@ -1,0 +1,30 @@
+name: Build Steam Quick Export
+description: Fetch the pinned FFmpeg, build the onedir bundle, and smoke-test it.
+inputs:
+  smoke-test-arguments:
+    description: Arguments passed to the bundled exe during the smoke test.
+    required: false
+    default: --self-test --scan-self-test
+outputs:
+  bundle-directory:
+    description: Folder that contains the built application.
+    value: dist-simple\SteamQuickExport
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+    - name: Fetch pinned FFmpeg
+      shell: pwsh
+      run: .\scripts\get-ffmpeg.ps1
+    - name: Build Steam Quick Export
+      shell: pwsh
+      run: .\build-quick.ps1
+    - name: Smoke-test Steam Quick Export bundle
+      shell: pwsh
+      run: |
+        # `&` does not reliably surface $LASTEXITCODE for this windowed exe;
+        # Start-Process -Wait -PassThru does.
+        $process = Start-Process -FilePath ".\dist-simple\SteamQuickExport\SteamQuickExport.exe" -ArgumentList "${{ inputs.smoke-test-arguments }}" -PassThru -Wait
+        if ($process.ExitCode -ne 0) { throw "Steam Quick Export self-test failed ($($process.ExitCode))" }

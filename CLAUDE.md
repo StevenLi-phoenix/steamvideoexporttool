@@ -12,10 +12,11 @@ Use `uv` for all Python commands; do not use `pip`.
 uv run python .\steam_quick_export.py
 uv run --group test coverage run -m unittest discover -s tests -v
 uv run --group test coverage report --fail-under=80
+.\scripts\get-ffmpeg.ps1
 .\build-quick.ps1
 ```
 
-The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, on `PATH`, or through `FFMPEG_PATH`. The build script uses `uv run` and embeds binaries from `dist\ffmpeg.exe` and `dist\ffprobe.exe`.
+The app needs `ffmpeg.exe` and preferably `ffprobe.exe` beside the executable, on `PATH`, or through `FFMPEG_PATH`. `scripts\get-ffmpeg.ps1` downloads the pinned, SHA-256-verified FFmpeg into `dist\`, and `build-quick.ps1` embeds those binaries; both CI and release workflows share the same `.github/actions/build-app` composite action.
 
 ## Architecture
 

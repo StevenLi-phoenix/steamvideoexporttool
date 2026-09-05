@@ -2,8 +2,13 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -26,26 +31,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: ./.github/actions/build-app
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          enable-cache: true
-      - name: Download FFmpeg bundle
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
-          $extractRoot = Join-Path $env:RUNNER_TEMP "ffmpeg"
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot
-          $bin = (Get-ChildItem $extractRoot -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
-          New-Item -ItemType Directory -Force -Path .\dist | Out-Null
-          Copy-Item (Join-Path $bin "ffmpeg.exe") .\dist\ffmpeg.exe
-          Copy-Item (Join-Path $bin "ffprobe.exe") .\dist\ffprobe.exe
-      - name: Build Steam Quick Export
-        run: powershell -ExecutionPolicy Bypass -File .\build-quick.ps1
-      - name: Smoke-test Steam Quick Export bundle
-        shell: pwsh
-        run: |
-          # `&` does not reliably surface $LASTEXITCODE for this windowed exe;
-          # Start-Process -Wait -PassThru does.
-          $process = Start-Process -FilePath ".\dist-simple\SteamQuickExport\SteamQuickExport.exe" -ArgumentList "--self-test", "--scan-self-test" -PassThru -Wait
-          if ($process.ExitCode -ne 0) { throw "Steam Quick Export self-test failed ($($process.ExitCode))" }
+          name: SteamQuickExport-${{ github.sha }}
+          path: dist-simple\SteamQuickExport\

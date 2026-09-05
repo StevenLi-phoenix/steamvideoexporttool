@@ -54,6 +54,7 @@ by this app.** Output defaults to your Windows Videos folder under
 ### Package as a standalone EXE
 
 ```powershell
+.\scripts\get-ffmpeg.ps1   # fetches the pinned, hash-verified FFmpeg into dist\
 .\build-quick.ps1
 ```
 

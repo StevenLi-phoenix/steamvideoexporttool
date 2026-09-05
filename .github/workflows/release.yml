@@ -13,37 +13,24 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - name: Verify tag matches the pyproject version
+        shell: pwsh
+        run: |
+          $pyprojectVersion = (Select-String -Path pyproject.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ($env:GITHUB_REF_NAME -ne "v$pyprojectVersion") {
+            throw "Tag $($env:GITHUB_REF_NAME) does not match pyproject.toml version v$pyprojectVersion"
+          }
+      - uses: ./.github/actions/build-app
         with:
-          enable-cache: true
-      - name: Download FFmpeg bundle
-        shell: pwsh
-        run: |
-          $archive = Join-Path $env:RUNNER_TEMP "ffmpeg.zip"
-          $extractRoot = Join-Path $env:RUNNER_TEMP "ffmpeg"
-          Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot
-          $bin = (Get-ChildItem $extractRoot -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
-          New-Item -ItemType Directory -Force -Path .\dist | Out-Null
-          Copy-Item (Join-Path $bin "ffmpeg.exe") .\dist\ffmpeg.exe
-          Copy-Item (Join-Path $bin "ffprobe.exe") .\dist\ffprobe.exe
-      - name: Build Steam Quick Export
-        run: powershell -ExecutionPolicy Bypass -File .\build-quick.ps1
-      - name: Smoke-test Steam Quick Export bundle
-        shell: pwsh
-        run: |
-          # `&` does not reliably surface $LASTEXITCODE for this windowed exe;
-          # Start-Process -Wait -PassThru does.
-          $process = Start-Process -FilePath ".\dist-simple\SteamQuickExport\SteamQuickExport.exe" -ArgumentList "--self-test" -PassThru -Wait
-          if ($process.ExitCode -ne 0) { throw "Steam Quick Export self-test failed ($($process.ExitCode))" }
+          smoke-test-arguments: --self-test --scan-self-test
       - name: Package release files
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
 
-          # Steam Quick Export: same idea, but ffmpeg.exe/ffprobe.exe are plain
-          # files inside the onedir bundle, so the no-ffmpeg variant is just a
-          # copy of that folder with the two binaries stripped out.
+          # Steam Quick Export: ffmpeg.exe/ffprobe.exe are plain files inside
+          # the onedir bundle, so the no-ffmpeg variant is just a copy of that
+          # folder with the two binaries stripped out.
           Compress-Archive -Path .\dist-simple\SteamQuickExport\* -DestinationPath ".\SteamQuickExport-$tag-win-x64-ffmpeg.zip"
           $noFfmpegDir = ".\dist-simple\SteamQuickExport-no-ffmpeg"
           Copy-Item .\dist-simple\SteamQuickExport $noFfmpegDir -Recurse
@@ -66,4 +53,9 @@ jobs:
             "SteamQuickExport-$tag-win-x64-ffmpeg.zip",
             "SteamQuickExport-$tag-win-x64.zip"
           )
-          gh release create "$tag" @assets --title "Steam Quick Export $tag" --generate-notes
+          # Re-running the workflow must not fail on an existing release.
+          if (gh release view "$tag" > $null 2>&1) {
+            gh release upload "$tag" @assets --clobber
+          } else {
+            gh release create "$tag" @assets --title "Steam Quick Export $tag" --generate-notes
+          }
