@@ -6,6 +6,36 @@ follows [Keep a Changelog](https://keepachangelog.com/) and the project uses
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-05
+
+### Added
+
+- **Chinese/English UI**: a language toggle in the header switches the whole
+  interface (and the export pipeline's log messages) instantly; the choice is
+  auto-detected from the system locale and persisted. CLI accepts `--lang`.
+- Settings persistence: recordings folder, output folder, log-pane visibility,
+  and window geometry are remembered between runs
+  (`%LOCALAPPDATA%\SteamQuickExport\settings.json`).
+
+### Changed
+
+- Export progress is now parsed from pipeline messages and shown as a real
+  percentage (previously an indeterminate spinner for the whole export).
+- Sizes in the recording list use adaptive units (KB/MB/GB) instead of always
+  GB.
+
+### Fixed
+
+- Background-job errors keep the traceback (shown in the error dialog's
+  details) instead of a bare one-line message.
+- Cancelling an export no longer pops a warning dialog; it reports in the
+  status line and log.
+- "Open output folder" creates the folder when it does not exist instead of
+  failing silently.
+- The idle status hint follows the selected language.
+- The Logs toggle reflects the pane state; the scan-progress connection is
+  made before the worker starts so early messages are not lost.
+
 ## [0.2.2] - 2026-09-05
 
 ### Added

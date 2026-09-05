@@ -15,6 +15,11 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import scripts.export_game as export_game
+from steam_exporter.i18n import set_language
+
+# Pipeline messages are translated; pin the language so assertions are stable
+# regardless of the machine's saved settings or UI locale.
+set_language("en", persist=False)
 
 STREAMS = [{"codec_type": "video", "codec_name": "h264"}, {"codec_type": "audio", "codec_name": "aac"}]
 

@@ -5,6 +5,8 @@ from pathlib import Path
 
 from scripts.export_game import main as export_game
 
+from .i18n import tr
+
 
 def run_export(arguments, sender):
     try:
@@ -15,7 +17,7 @@ def run_export(arguments, sender):
         if output.exists() and (any(output.glob("*.mp4")) or (output / ".pending").exists()):
             output /= datetime.now().strftime("export_%Y%m%d_%H%M%S_%f")
         arguments[index] = str(output)
-        sender.send(("log", "正在检查源文件和可用磁盘空间…"))
+        sender.send(("log", tr("backend_checking")))
         export_game(arguments, lambda message: sender.send(("log", message)))
         sender.send(("done", str(output)))
     except BaseException as exc:

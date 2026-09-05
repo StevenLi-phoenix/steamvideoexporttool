@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
+import traceback
 import webbrowser
 import winreg
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QTimer, QUrl, Signal
+from PySide6.QtCore import QByteArray, Qt, QThread, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QIcon, QPalette, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -32,8 +34,12 @@ from PySide6.QtWidgets import (
 )
 
 from .export_client import ExportClient
+from .i18n import current_language, normalize_language, set_language, tr
 from .library import scan_library
-from .media import extract_preview_frames, find_executable, recording_timestamp, resource_path, safe_name
+from .media import extract_preview_frames, find_executable, format_bytes, recording_timestamp, resource_path, safe_name
+from .settings import load_settings, update_settings
+
+_PROGRESS = re.compile(r"^\[(\d+)/(\d+)\]")
 
 
 def videos_path():
@@ -57,19 +63,23 @@ class Job(QThread):
         try:
             self.result.emit(self.action(self.message.emit))
         except Exception as exc:
-            self.failed.emit(str(exc))
+            # The traceback lands in the log pane via the error dialog's details.
+            detail = "".join(traceback.format_exception(exc))
+            self.failed.emit(f"{type(exc).__name__}: {exc}\n\n{detail}")
 
 
 class SimpleApp(QMainWindow):
     def __init__(self, autoscan=True):
         super().__init__()
-        self.setWindowTitle("Steam 录制")
-        self.resize(1040, 760)
         self.setMinimumSize(820, 620)
-        self.source = videos_path() / "Steam" / "video"
-        self.output = videos_path() / "exported"
+        saved = load_settings()
+        self.source = Path(saved["source"]) if saved.get("source") else videos_path() / "Steam" / "video"
+        self.output = Path(saved["output"]) if saved.get("output") else videos_path() / "exported"
         self.job = self.preview_job = None
         self.close_after_cancel = False
+        self.cancel_in_progress = False
+        self._games = []
+        self._status = None
         self.export_client = ExportClient(self)
         self.export_client.message.connect(self.export_message)
         self.export_client.completed.connect(self.export_completed)
@@ -78,7 +88,6 @@ class SimpleApp(QMainWindow):
         self.working = False
         self.games = QListWidget()
         self.recordings = QTreeWidget()
-        self.recordings.setHeaderLabels(["录像时间", "大小"])
         self.recordings.setRootIsDecorated(False)
         self.recordings.setColumnWidth(0, 300)
         self.recordings.setAlternatingRowColors(True)
@@ -87,29 +96,28 @@ class SimpleApp(QMainWindow):
         preview_layout.setContentsMargins(0, 0, 0, 0)
         self.preview_frames = []
         for _ in range(4):
-            frame = QLabel("预览")
+            frame = QLabel()
             frame.setAlignment(Qt.AlignCenter)
             frame.setMinimumHeight(150)
             frame.setStyleSheet("background: #ededed; color: #666;")
             preview_layout.addWidget(frame)
             self.preview_frames.append(frame)
-        self.title = QLabel("你的游戏")
+        self.title = QLabel()
         self.title.setStyleSheet("font-size: 22px; font-weight: 600;")
-        self.detail = QLabel("正在查找录制…")
-        self.status = QLabel("自动查找 Steam 录制，无需输入 AppID。")
-        self.start = QPushButton("导出所选录像")
+        self.detail = QLabel()
+        self.status = QLabel()
+        self.start = QPushButton()
         self.start.setEnabled(False)
-        self.cancel = QPushButton("取消导出")
+        self.cancel = QPushButton()
         self.cancel.setVisible(False)
         self.cancel.setMinimumWidth(110)
-        self.refresh = QPushButton("刷新")
-        self.refresh.setToolTip("使用缓存刷新；按住 Shift 点击可强制重新扫描")
-        self.location = QPushButton("更改录制位置…")
-        self.steam_recordings = QPushButton("打开 Steam 录制")
-        self.destination = QPushButton("更改输出位置…")
-        self.select_all = QPushButton("全选")
-        self.select_none = QPushButton("清空选择")
-        self.open_output = QPushButton("打开输出文件夹")
+        self.refresh = QPushButton()
+        self.location = QPushButton()
+        self.steam_recordings = QPushButton()
+        self.destination = QPushButton()
+        self.select_all = QPushButton()
+        self.select_none = QPushButton()
+        self.open_output = QPushButton()
         self.progress = QProgressBar()
         self.progress.setMaximumHeight(6)
         self.progress.setTextVisible(False)
@@ -117,8 +125,11 @@ class SimpleApp(QMainWindow):
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(2000)
         self.log.setMaximumHeight(100)
-        self.log.hide()
-        self.logs = QPushButton("日志")
+        self.logs = QPushButton()
+        self.logs.setCheckable(True)
+        self.logs.setChecked(bool(saved.get("log_visible")))
+        self.log.setVisible(self.logs.isChecked())
+        self.language = QPushButton()
         self.output_label = QLabel()
         self.output_label.setWordWrap(True)
         self.update_output()
@@ -127,10 +138,11 @@ class SimpleApp(QMainWindow):
         layout.setContentsMargins(24, 22, 24, 20)
         layout.setSpacing(14)
         header = QHBoxLayout()
-        heading = QLabel("录制库")
-        heading.setStyleSheet("font-size: 28px; font-weight: 600;")
-        header.addWidget(heading)
+        self.heading = QLabel()
+        self.heading.setStyleSheet("font-size: 28px; font-weight: 600;")
+        header.addWidget(self.heading)
         header.addStretch()
+        header.addWidget(self.language)
         header.addWidget(self.steam_recordings)
         header.addWidget(self.location)
         header.addWidget(self.refresh)
@@ -175,6 +187,7 @@ class SimpleApp(QMainWindow):
         self.location.clicked.connect(self.choose_source)
         self.steam_recordings.clicked.connect(self.open_steam_recordings)
         self.destination.clicked.connect(self.choose_output)
+        self.language.clicked.connect(self.toggle_language)
         self.games.currentItemChanged.connect(self.show_game)
         self.recordings.itemChanged.connect(self.selection_changed)
         self.recordings.currentItemChanged.connect(self.show_preview)
@@ -182,20 +195,81 @@ class SimpleApp(QMainWindow):
         self.select_none.clicked.connect(lambda: self.check_all(False))
         self.start.clicked.connect(self.export)
         self.cancel.clicked.connect(self.cancel_export)
-        self.open_output.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.output))))
-        self.logs.clicked.connect(lambda: self.log.setVisible(not self.log.isVisible()))
+        self.open_output.clicked.connect(self.open_output_folder)
+        self.logs.toggled.connect(self.log.setVisible)
+        self.logs.toggled.connect(lambda visible: update_settings(log_visible=visible))
+        self.retranslate()
+        geometry = saved.get("geometry")
+        if not geometry or not self.restoreGeometry(QByteArray.fromHex(geometry.encode())):
+            self.resize(1040, 760)
         if autoscan:
             QTimer.singleShot(0, self.scan_games)
 
+    def retranslate(self):
+        """Re-apply every static string; called at startup and on language switch."""
+        self.setWindowTitle(tr("app_title"))
+        self.heading.setText(tr("heading_library"))
+        self.steam_recordings.setText(tr("btn_open_steam"))
+        self.location.setText(tr("btn_change_source"))
+        self.refresh.setText(tr("btn_refresh"))
+        self.refresh.setToolTip(tr("refresh_tooltip"))
+        self.destination.setText(tr("btn_change_output"))
+        self.open_output.setText(tr("btn_open_output"))
+        self.logs.setText(tr("btn_logs"))
+        self.select_all.setText(tr("btn_select_all"))
+        self.select_none.setText(tr("btn_select_none"))
+        self.cancel.setText(tr("btn_cancel"))
+        self.start.setText(tr("btn_export", count=0))
+        self.language.setText(tr("language_toggle"))
+        self.language.setToolTip(tr("language_tooltip"))
+        self.recordings.setHeaderLabels([tr("col_time"), tr("col_size")])
+        for frame in self.preview_frames:
+            if frame.pixmap() is None or frame.pixmap().isNull():
+                frame.clear()
+                frame.setText(tr("preview_placeholder"))
+        for index in range(self.games.count()):
+            item = self.games.item(index)
+            appid, name, rows = item.data(Qt.UserRole)
+            item.setText(f"{name}\n{tr('recordings_count', count=len(rows))}")
+        current = self.games.currentItem()
+        if current is not None:
+            appid, name, rows = current.data(Qt.UserRole)
+            self.title.setText(name)
+            self.detail.setText(tr("detail_hint", count=len(rows)))
+        elif self._games:
+            self.title.setText(tr("title_placeholder"))
+            self.detail.setText(tr("detail_none"))
+        else:
+            self.title.setText(tr("title_placeholder"))
+            self.detail.setText(tr("detail_finding"))
+        if self._status is None and not self.status.text():
+            self.set_status("status_auto")
+        elif self._status is not None:
+            key, kwargs = self._status
+            self.status.setText(tr(key, **kwargs))
+        self.update_output()
+        self.selection_changed()
+
     def update_output(self):
-        self.output_label.setText(f"保存到 {self.output} / 游戏名\nMP4 · 原画质无损封装 · 每段 < 64 GB · 保留原文件")
+        self.output_label.setText(tr("output_label", output=self.output))
+
+    def set_status(self, key, **kwargs):
+        """Static status: remembered and re-rendered by retranslate()."""
+        self._status = (key, kwargs)
+        self.status.setText(tr(key, **kwargs))
+
+    def set_raw_status(self, text):
+        """Transient text (progress/log lines); left untouched by retranslate()."""
+        self._status = None
+        self.status.setText(text)
 
     def choose_source(self):
-        value = QFileDialog.getExistingDirectory(self, "选择 Steam 录制目录", str(self.source))
+        value = QFileDialog.getExistingDirectory(self, tr("dialog_choose_source"), str(self.source))
         if value:
             self.source = Path(value)
             if (self.source / "video").is_dir():
                 self.source /= "video"
+            update_settings(source=str(self.source))
             self.scan_games()
 
     def open_steam_recordings(self):
@@ -203,70 +277,104 @@ class SimpleApp(QMainWindow):
         # not the Settings dialog; that manager is reachable via this URI handler.
         try:
             webbrowser.open("steam://open/screenshots")
-            self.status.setText("已打开 Steam 的“截图与录像”，请在其中删除录像；完成后点击刷新。")
+            self.set_status("steam_opened")
         except OSError as exc:
-            QMessageBox.warning(self, "无法打开 Steam", str(exc))
+            QMessageBox.warning(self, tr("steam_open_failed"), str(exc))
 
     def choose_output(self):
-        value = QFileDialog.getExistingDirectory(self, "选择输出位置", str(self.output))
+        value = QFileDialog.getExistingDirectory(self, tr("dialog_choose_output"), str(self.output))
         if value:
             self.output = Path(value)
+            update_settings(output=str(self.output))
             self.update_output()
+
+    def open_output_folder(self):
+        existed = self.output.exists()
+        try:
+            self.output.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            QMessageBox.warning(self, tr("dialog_notice"), tr("output_open_failed", path=self.output))
+            return
+        if not existed:
+            self.set_status("output_created", path=self.output)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.output)))
+
+    def toggle_language(self):
+        set_language("en" if current_language() == "zh-cn" else "zh-cn", persist=True)
+        self.retranslate()
 
     def busy(self, value):
         self.working = value
         for widget in [self.games, self.recordings, self.location, self.destination, self.refresh, self.select_all, self.select_none]:
             widget.setEnabled(not value)
-        self.progress.setRange(0, 0 if value else 100)
+        if value:
+            self.progress.setRange(0, 0)
+        else:
+            self.progress.setRange(0, 100)
+            self.progress.setValue(0)
         self.selection_changed()
         self.cancel.setVisible(value and self.export_client.isRunning())
 
-    def run_job(self, action, done):
+    def run_job(self, action, done, on_message=None):
         self.busy(True)
         self.job = Job(action, self)
         self.job.message.connect(self.log.appendPlainText)
+        if on_message:
+            # Connected before the thread starts so early messages are not lost.
+            self.job.message.connect(on_message)
         self.job.result.connect(done)
         self.job.failed.connect(self.error)
         self.job.finished.connect(lambda: self.busy(False))
         self.job.start()
 
     def error(self, message):
-        self.status.setText("操作未完成，原始录制已保留。")
+        if self.cancel_in_progress:
+            # Cancelling is a user request, not a failure; the log suffices.
+            self.cancel_in_progress = False
+            self.log.appendPlainText(message)
+            return
+        self.set_status("error_status")
         self.log.appendPlainText(message)
         self.log.show()
-        QMessageBox.warning(self, "提示", message)
+        self.logs.setChecked(True)
+        head, _, detail = message.partition("\n")
+        box = QMessageBox(QMessageBox.Icon.Warning, tr("dialog_notice"), head or tr("dialog_notice"), parent=self)
+        if detail:
+            box.setDetailedText(detail.strip())
+        box.exec()
 
     def scan_games(self):
         source = self.source
         force = bool(QApplication.keyboardModifiers() & Qt.ShiftModifier)
-        self.status.setText("正在读取录制库…")
-        self.run_job(lambda log: scan_library(source, log, force=force), self.load_games)
-        self.job.message.connect(self.status.setText)
+        self.set_status("status_scanning")
+        self.run_job(lambda log: scan_library(source, log, force=force), self.load_games, on_message=self.set_raw_status)
 
     def load_games(self, games):
+        self._games = games
         self.games.clear()
         for appid, name, rows in games:
-            item = QListWidgetItem(f"{name}\n{len(rows)} 段录像")
+            item = QListWidgetItem(f"{name}\n{tr('recordings_count', count=len(rows))}")
             item.setData(Qt.UserRole, (appid, name, rows))
             self.games.addItem(item)
         if games:
             self.games.setCurrentRow(0)
         else:
-            self.detail.setText("未找到录制，请点击右上角“更改录制位置”。")
-        self.status.setText(f"找到 {len(games)} 个游戏 · {self.source}")
+            self.title.setText(tr("title_placeholder"))
+            self.detail.setText(tr("detail_none"))
+        self.set_status("status_found", count=len(games), source=self.source)
 
     def show_game(self, item, previous=None):
         self.recordings.clear()
         for frame in self.preview_frames:
             frame.clear()
-            frame.setText("预览")
+            frame.setText(tr("preview_placeholder"))
         if not item:
             return
         appid, name, rows = item.data(Qt.UserRole)
         self.title.setText(name)
-        self.detail.setText(f"{len(rows)} 段录像 · 勾选要导出的录像，点击行预览")
+        self.detail.setText(tr("detail_hint", count=len(rows)))
         for folder, size in rows:
-            row = QTreeWidgetItem([recording_timestamp(folder).strftime("%Y-%m-%d  %H:%M:%S"), f"{size / 1e9:.2f} GB"])
+            row = QTreeWidgetItem([recording_timestamp(folder).strftime("%Y-%m-%d  %H:%M:%S"), format_bytes(size)])
             row.setData(0, Qt.UserRole, str(folder))
             row.setCheckState(0, Qt.Checked)
             self.recordings.addTopLevelItem(row)
@@ -281,7 +389,7 @@ class SimpleApp(QMainWindow):
 
     def selection_changed(self, *args):
         count = len(self.selected())
-        self.start.setText(f"导出所选录像 ({count})")
+        self.start.setText(tr("btn_export", count=count))
         self.start.setEnabled(count > 0 and not self.working)
 
     def check_all(self, checked):
@@ -293,7 +401,8 @@ class SimpleApp(QMainWindow):
             return
         folder = Path(item.data(0, Qt.UserRole))
         for frame in self.preview_frames:
-            frame.setText("正在读取…")
+            frame.clear()
+            frame.setText(tr("preview_loading"))
 
         def action(log):
             with tempfile.TemporaryDirectory(prefix="steam-preview-") as temp:
@@ -310,7 +419,7 @@ class SimpleApp(QMainWindow):
 
         self.preview_job = Job(action, self)
         self.preview_job.result.connect(done)
-        self.preview_job.failed.connect(lambda _: [frame.setText("预览不可用") for frame in self.preview_frames])
+        self.preview_job.failed.connect(lambda _: [frame.setText(tr("preview_unavailable")) for frame in self.preview_frames])
 
         def next_preview():
             current = self.recordings.currentItem()
@@ -331,7 +440,7 @@ class SimpleApp(QMainWindow):
         for folder in selected:
             args += ["--recording", Path(folder).name]
         self.log.clear()
-        self.status.setText(f"正在导出 {len(selected)} 段录像，请保持程序打开…")
+        self.set_status("status_exporting", count=len(selected))
         self.busy(True)
         # Library browsing stays usable while the snapshot of selected paths exports.
         for widget in [self.games, self.recordings, self.select_all, self.select_none]:
@@ -342,8 +451,9 @@ class SimpleApp(QMainWindow):
 
     def cancel_export(self):
         if self.export_client.isRunning():
+            self.cancel_in_progress = True
             self.cancel.setEnabled(False)
-            self.status.setText("正在取消导出并停止后台进程…")
+            self.set_status("status_cancelling")
             self.export_client.cancel()
 
     def export_finished(self):
@@ -354,20 +464,29 @@ class SimpleApp(QMainWindow):
 
     def export_message(self, message):
         self.log.appendPlainText(message)
-        self.status.setText(message[-160:])
+        self.set_raw_status(message[-160:])
+        match = _PROGRESS.match(message)
+        if match:
+            index, total = int(match[1]), int(match[2])
+            self.progress.setRange(0, total)
+            self.progress.setValue(index - 1)
+        elif message.startswith(("COMPLETE", "完成")):
+            self.progress.setRange(0, 1)
+            self.progress.setValue(1)
 
     def export_completed(self, output):
-        self.status.setText(f"导出完成：{output}")
+        self.set_status("export_done", output=output)
         QDesktopServices.openUrl(QUrl.fromLocalFile(output))
 
     def closeEvent(self, event):
+        update_settings(geometry=bytes(self.saveGeometry().toHex()).decode("ascii"))
         if self.export_client.isRunning():
             self.close_after_cancel = True
             self.cancel_export()
-            self.status.setText("正在取消导出，完成后关闭窗口…")
+            self.set_status("status_close_cancel")
             event.ignore()
         elif any(job and job.isRunning() for job in [self.job, self.preview_job]):
-            QMessageBox.information(self, "正在处理", "请等待当前操作完成后关闭程序。")
+            QMessageBox.information(self, tr("dialog_busy_title"), tr("dialog_busy_text"))
             event.ignore()
         else:
             event.accept()
@@ -395,7 +514,12 @@ def configure_app(app):
 
 
 def main():
+    if "--lang" in sys.argv:
+        value = normalize_language(sys.argv[sys.argv.index("--lang") + 1])
+        if value:
+            set_language(value)
     app = QApplication([])
+    app.setApplicationName("SteamQuickExport")
     configure_app(app)
     smoke = "--self-test" in sys.argv
     window = SimpleApp(autoscan=not smoke)

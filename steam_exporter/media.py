@@ -23,6 +23,16 @@ PROBE_TIMEOUT_SECONDS = 120
 _GAME_NAME_CACHE: dict[str, str | None] = {}
 
 
+def format_bytes(value: int | float) -> str:
+    units = ("B", "KB", "MB", "GB", "TB")
+    amount = float(value)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            return f"{int(amount)} B" if unit == "B" else f"{amount:.1f} {unit}"
+        amount /= 1024
+    raise AssertionError("unreachable")
+
+
 def safe_name(value: str, fallback: str = "SteamRecording") -> str:
     value = re.sub(r"[<>:\"/\\|?*\x00-\x1f]", "_", value).strip(" .")
     return value or fallback

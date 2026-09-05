@@ -43,6 +43,10 @@ by this app.** Output defaults to your Windows Videos folder under
 
 - Scans your whole library automatically and caches the result, so reopening
   the app is fast; hold Shift while clicking Refresh to force a full rescan.
+- **中文 / English**: click the language button in the top right to switch the
+  whole UI (including export logs) instantly; the choice is remembered.
+- Your recordings folder, output folder, and window layout are remembered
+  between runs.
 - **Open Steam Recordings** opens Steam's own screenshot/recording manager so
   you can delete captures through Steam; click Refresh afterward.
 - Exporting runs in the background, so the library stays browsable and you

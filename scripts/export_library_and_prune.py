@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from scripts.export_game import LIMIT, discard_staging, process_recording, publish
+from steam_exporter.i18n import tr
 from steam_exporter.media import find_executable, resolve_game_name
 
 
@@ -37,31 +38,31 @@ def main(argv=None) -> None:
     parser.add_argument("--delete-sources", action="store_true", help="Delete each source recording only after verification.")
     args = parser.parse_args(argv)
     if not args.delete_sources:
-        raise SystemExit("Refusing to delete source footage without --delete-sources.")
+        raise SystemExit(tr("prune_refuse"))
 
     video_root = args.source / "video"
     output_root = args.output or (args.source / "exports")
     if not video_root.is_dir():
-        raise SystemExit(f"No Steam video folder was found at {video_root}.")
+        raise SystemExit(tr("prune_no_video_root", path=video_root))
     folders = sorted(folder for folder in video_root.iterdir() if folder.is_dir() and folder.name.startswith("bg_"))
     if not folders:
-        raise SystemExit("No Steam recording folders were found.")
+        raise SystemExit(tr("prune_no_folders"))
     ffmpeg = find_executable("ffmpeg")
     ffprobe = find_executable("ffprobe", ffmpeg)
     if not ffmpeg or not ffprobe:
-        raise SystemExit("FFmpeg and ffprobe are required.")
+        raise SystemExit(tr("need_ffmpeg"))
     output_root.mkdir(parents=True, exist_ok=True)
 
     for position, folder in enumerate(folders, start=1):
         if folder.parent.resolve() != video_root.resolve():
             raise SystemExit(f"Unexpected source folder: {folder}")
-        print(f"\n[{position}/{len(folders)}] Exporting {folder.name}", flush=True)
+        print("\n" + tr("progress", index=position, total=len(folders), folder=folder.name), flush=True)
         staging = output_root / ".pending"
         if staging.exists():
-            raise SystemExit("Existing pending export must be inspected before another run")
+            raise SystemExit(tr("pending_exists"))
         total = sum(path.stat().st_size for path in folder.rglob("*.m4s"))
         if shutil.disk_usage(output_root).free < total * 1.15 + LIMIT:
-            raise SystemExit("Insufficient free space including splitting headroom")
+            raise SystemExit(tr("no_space"))
         staging.mkdir()
         try:
             game = resolve_game_name(folder)
@@ -73,16 +74,16 @@ def main(argv=None) -> None:
             for entry in report:
                 exported = Path(entry["file"])
                 if not exported.is_file() or exported.stat().st_size <= 0:
-                    raise SystemExit(f"Verified output is missing or empty: {exported}; source retained.")
+                    raise SystemExit(tr("prune_output_missing", file=exported))
         finally:
             if staging.exists():
                 discard_staging(staging)
-        print(f"Verified {len(report)} MP4 file(s). Deleting {folder.name}.", flush=True)
+        print(tr("prune_verified", count=len(report), folder=folder.name), flush=True)
         shutil.rmtree(folder)
 
     if not any(video_root.iterdir()):
         video_root.rmdir()
-    print("All original recording folders were exported, verified, and deleted.", flush=True)
+    print(tr("prune_done"), flush=True)
 
 
 if __name__ == "__main__":

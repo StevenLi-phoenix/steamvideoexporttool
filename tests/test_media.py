@@ -19,6 +19,7 @@ from steam_exporter.media import (
     _write_concat_list,
     extract_preview_frames,
     find_executable,
+    format_bytes,
     recording_timestamp,
     resolve_game_name,
     resource_path,
@@ -31,6 +32,12 @@ class NamingTests(unittest.TestCase):
     def test_safe_name_removes_windows_invalid_characters(self):
         self.assertEqual(safe_name("A:game/recording?*"), "A_game_recording__")
         self.assertEqual(safe_name(" . "), "SteamRecording")
+
+    def test_format_bytes_uses_human_readable_units(self):
+        self.assertEqual(format_bytes(512), "512 B")
+        self.assertEqual(format_bytes(1024), "1.0 KB")
+        self.assertEqual(format_bytes(1024**3), "1.0 GB")
+        self.assertEqual(format_bytes(1.5 * 1024**3), "1.5 GB")
 
 
 class SteamMetadataTests(unittest.TestCase):

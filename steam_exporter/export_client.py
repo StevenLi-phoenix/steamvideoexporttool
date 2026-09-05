@@ -6,6 +6,7 @@ from multiprocessing import get_context
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .export_backend import run_export
+from .i18n import tr
 
 
 class ExportClient(QObject):
@@ -89,9 +90,9 @@ class ExportClient(QObject):
         self.process.join(timeout=0)
         self.process.close()
         if self.cancel_requested:
-            self.failed.emit("已取消导出，未完成的临时文件已保留在 .pending 中，可安全删除。")
+            self.failed.emit(tr("cancel_note"))
         elif self.outcome and self.outcome[0] == "done" and exitcode == 0:
             self.completed.emit(self.outcome[1])
         else:
-            self.failed.emit(self.outcome[1] if self.outcome else f"Export backend exited ({exitcode})")
+            self.failed.emit(self.outcome[1] if self.outcome else tr("backend_exited", code=exitcode))
         self.finished.emit()
