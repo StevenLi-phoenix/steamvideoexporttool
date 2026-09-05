@@ -35,6 +35,13 @@ def safe_name(value: str, fallback: str = "SteamRecording") -> str:
     return value or fallback
 
 
+def resource_path(*parts: str) -> Path:
+    """Locate a bundled resource (e.g. the app icon): next to the running exe
+    when frozen, or under the project root when running from source."""
+    app_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+    return app_dir.joinpath(*parts)
+
+
 def _ffmpeg_candidates() -> list[Path]:
     candidates: list[Path] = []
     configured = os.environ.get("FFMPEG_PATH")
@@ -220,6 +227,50 @@ def extract_first_frame(files: list[Path], destination: Path, manifest: Path | N
     except Exception:
         destination.unlink(missing_ok=True)
         raise
+    finally:
+        if concat_list:
+            concat_list.unlink(missing_ok=True)
+
+
+def extract_preview_frames(files: list[Path], destination_dir: Path, manifest: Path | None = None) -> list[Path]:
+    """Create four representative thumbnails without modifying the recording."""
+    ffmpeg = find_executable("ffmpeg")
+    ffprobe = find_executable("ffprobe", ffmpeg)
+    if not ffmpeg or not ffprobe:
+        raise ConversionError("FFmpeg and ffprobe are required for previews.")
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    concat_list = _write_concat_list(files) if manifest is None else None
+    try:
+        probe = [str(ffprobe), "-v", "error"]
+        if manifest:
+            probe += ["-i", str(manifest)]
+        else:
+            probe += ["-f", "concat", "-safe", "0", "-i", str(concat_list)]
+        probe += ["-show_entries", "format=duration", "-of", "default=nk=1:nw=1"]
+        result = subprocess.run(probe, capture_output=True, text=True,
+                                creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        duration = max(0.0, float(result.stdout.strip()))
+        # One FFmpeg process with four independent fast seeks. It avoids decoding
+        # the whole recording while still keeping preview generation to one call.
+        command = [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y"]
+        for fraction in (0.0, 0.25, 0.5, 0.75):
+            command += ["-ss", str(duration * fraction)]
+            if manifest:
+                command += ["-i", str(manifest)]
+            else:
+                command += ["-f", "concat", "-safe", "0", "-i", str(concat_list)]
+        for index in range(4):
+            command += ["-map", f"{index}:v:0", "-frames:v", "1", "-vf", "scale=320:-2",
+                        "-q:v", "5", str(destination_dir / f"frame_{index + 1}.jpg")]
+        created = subprocess.run(command, capture_output=True, text=True,
+                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        outputs = [destination_dir / f"frame_{index}.jpg" for index in range(1, 5)
+                   if (destination_dir / f"frame_{index}.jpg").exists()]
+        if created.returncode != 0:
+            outputs = []
+        if not outputs:
+            raise ConversionError("FFmpeg could not create preview frames.")
+        return outputs
     finally:
         if concat_list:
             concat_list.unlink(missing_ok=True)

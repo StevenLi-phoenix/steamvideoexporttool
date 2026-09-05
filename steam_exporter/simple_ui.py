@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QPixmap, QPalette, QColor
+from PySide6.QtGui import QDesktopServices, QIcon, QPixmap, QPalette, QColor
 from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QSplitter, QTreeWidget, QTreeWidgetItem,
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QHBoxLayout, QLabel,
 
 from .export_client import ExportClient
 from .library import scan_library
-from .media import resolve_game_name, safe_name, recording_timestamp, extract_first_frame, find_executable
+from .media import resolve_game_name, safe_name, recording_timestamp, extract_preview_frames, find_executable, resource_path
 
 
 def videos_path():
@@ -59,7 +59,7 @@ class SimpleApp(QMainWindow):
         self.close_after_cancel = False
         self.export_client = ExportClient(self)
         self.export_client.message.connect(self.export_message)
-        self.export_client.completed.connect(lambda output: self.status.setText(f"导出完成：{output}"))
+        self.export_client.completed.connect(self.export_completed)
         self.export_client.failed.connect(self.error)
         self.export_client.finished.connect(self.export_finished)
         self.working = False
@@ -69,10 +69,17 @@ class SimpleApp(QMainWindow):
         self.recordings.setRootIsDecorated(False)
         self.recordings.setColumnWidth(0, 300)
         self.recordings.setAlternatingRowColors(True)
-        self.preview = QLabel("点击录像，查看首帧")
-        self.preview.setAlignment(Qt.AlignCenter)
-        self.preview.setMinimumHeight(180)
-        self.preview.setStyleSheet("background: #ededed; color: #666;")
+        self.preview = QWidget()
+        preview_layout = QHBoxLayout(self.preview)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        self.preview_frames = []
+        for _ in range(4):
+            frame = QLabel("预览")
+            frame.setAlignment(Qt.AlignCenter)
+            frame.setMinimumHeight(150)
+            frame.setStyleSheet("background: #ededed; color: #666;")
+            preview_layout.addWidget(frame)
+            self.preview_frames.append(frame)
         self.title = QLabel("你的游戏")
         self.title.setStyleSheet("font-size: 22px; font-weight: 600;")
         self.detail = QLabel("正在查找录制…")
@@ -238,8 +245,9 @@ class SimpleApp(QMainWindow):
 
     def show_game(self, item, previous=None):
         self.recordings.clear()
-        self.preview.clear()
-        self.preview.setText("点击录像，查看首帧")
+        for frame in self.preview_frames:
+            frame.clear()
+            frame.setText("预览")
         if not item:
             return
         appid, name, rows = item.data(Qt.UserRole)
@@ -270,20 +278,22 @@ class SimpleApp(QMainWindow):
         if not item or (self.preview_job and self.preview_job.isRunning()):
             return
         folder = Path(item.data(0, Qt.UserRole))
-        self.preview.setText("正在读取首帧…")
+        for frame in self.preview_frames:
+            frame.setText("正在读取…")
         def action(log):
             with tempfile.TemporaryDirectory(prefix="steam-preview-") as temp:
-                target = extract_first_frame([], Path(temp) / "frame.jpg", folder / "session.mpd")
-                return (str(folder), target.read_bytes())
+                targets = extract_preview_frames([], Path(temp), folder / "session.mpd")
+                return (str(folder), [target.read_bytes() for target in targets])
         def done(result):
             current = self.recordings.currentItem()
             if current and current.data(0, Qt.UserRole) == result[0]:
-                pixmap = QPixmap()
-                pixmap.loadFromData(result[1])
-                self.preview.setPixmap(pixmap.scaled(self.preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                for frame, data in zip(self.preview_frames, result[1]):
+                    pixmap = QPixmap()
+                    pixmap.loadFromData(data)
+                    frame.setPixmap(pixmap.scaled(frame.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.preview_job = Job(action, self)
         self.preview_job.result.connect(done)
-        self.preview_job.failed.connect(lambda _: self.preview.setText("此录像首帧暂不可用"))
+        self.preview_job.failed.connect(lambda _: [frame.setText("预览不可用") for frame in self.preview_frames])
         def next_preview():
             current = self.recordings.currentItem()
             if current and current.data(0, Qt.UserRole) != str(folder):
@@ -327,6 +337,10 @@ class SimpleApp(QMainWindow):
         self.log.appendPlainText(message)
         self.status.setText(message[-160:])
 
+    def export_completed(self, output):
+        self.status.setText(f"导出完成：{output}")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(output))
+
     def closeEvent(self, event):
         if self.export_client.isRunning():
             self.close_after_cancel = True
@@ -350,6 +364,9 @@ def configure_app(app):
                         (QPalette.HighlightedText, "#111111")]:
         palette.setColor(role, QColor(color))
     app.setPalette(palette)
+    icon_path = resource_path("assets", "app-icon.ico")
+    if icon_path.exists():
+        app.setWindowIcon(QIcon(str(icon_path)))
 
 
 def main():

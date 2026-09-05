@@ -26,20 +26,52 @@ jobs:
           $bin = (Get-ChildItem $extractRoot -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
           Copy-Item (Join-Path $bin "ffmpeg.exe") .\ffmpeg.exe
           Copy-Item (Join-Path $bin "ffprobe.exe") .\ffprobe.exe
-      - name: Build standalone bundle
+      - name: Build Steam Video Exporter
         run: powershell -ExecutionPolicy Bypass -File .\build.ps1
+      - name: Build Steam Quick Export
+        run: powershell -ExecutionPolicy Bypass -File .\build-quick.ps1
+      - name: Smoke-test Steam Quick Export bundle
+        shell: pwsh
+        run: |
+          & .\dist-simple\SteamQuickExport\SteamQuickExport.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Steam Quick Export self-test failed ($LASTEXITCODE)" }
       - name: Package release files
         shell: pwsh
-        run: Compress-Archive -Path .\dist\SteamVideoExporter.exe, .\dist\ffmpeg.exe, .\dist\ffprobe.exe -DestinationPath .\SteamVideoExporter-${{ github.ref_name }}-win-x64.zip
-      - name: Upload workflow artifact
+        run: |
+          $tag = "${{ github.ref_name }}"
+
+          # Steam Video Exporter: bundled-FFmpeg build, and an exe-only build for
+          # users who already have ffmpeg/ffprobe on PATH or via FFMPEG_PATH.
+          Compress-Archive -Path .\dist\SteamVideoExporter.exe, .\dist\ffmpeg.exe, .\dist\ffprobe.exe -DestinationPath ".\SteamVideoExporter-$tag-win-x64-ffmpeg.zip"
+          Compress-Archive -Path .\dist\SteamVideoExporter.exe -DestinationPath ".\SteamVideoExporter-$tag-win-x64.zip"
+
+          # Steam Quick Export: same idea, but ffmpeg.exe/ffprobe.exe are plain
+          # files inside the onedir bundle, so the no-ffmpeg variant is just a
+          # copy of that folder with the two binaries stripped out.
+          Compress-Archive -Path .\dist-simple\SteamQuickExport\* -DestinationPath ".\SteamQuickExport-$tag-win-x64-ffmpeg.zip"
+          $noFfmpegDir = ".\dist-simple\SteamQuickExport-no-ffmpeg"
+          Copy-Item .\dist-simple\SteamQuickExport $noFfmpegDir -Recurse
+          Remove-Item (Join-Path $noFfmpegDir "ffmpeg.exe"), (Join-Path $noFfmpegDir "ffprobe.exe") -Force
+          Compress-Archive -Path "$noFfmpegDir\*" -DestinationPath ".\SteamQuickExport-$tag-win-x64.zip"
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: SteamVideoExporter-${{ github.ref_name }}-win-x64
-          path: SteamVideoExporter-${{ github.ref_name }}-win-x64.zip
+          name: windows-builds-${{ github.ref_name }}
+          path: |
+            SteamVideoExporter-${{ github.ref_name }}-win-x64-ffmpeg.zip
+            SteamVideoExporter-${{ github.ref_name }}-win-x64.zip
+            SteamQuickExport-${{ github.ref_name }}-win-x64-ffmpeg.zip
+            SteamQuickExport-${{ github.ref_name }}-win-x64.zip
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          $archive = "SteamVideoExporter-${{ github.ref_name }}-win-x64.zip"
-          gh release create "${{ github.ref_name }}" $archive --title "Steam Video Exporter ${{ github.ref_name }}" --generate-notes
+          $tag = "${{ github.ref_name }}"
+          $assets = @(
+            "SteamVideoExporter-$tag-win-x64-ffmpeg.zip",
+            "SteamVideoExporter-$tag-win-x64.zip",
+            "SteamQuickExport-$tag-win-x64-ffmpeg.zip",
+            "SteamQuickExport-$tag-win-x64.zip"
+          )
+          gh release create "$tag" @assets --title "Steam Video Exporter $tag" --generate-notes

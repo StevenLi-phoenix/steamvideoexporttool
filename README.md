@@ -4,103 +4,115 @@
   <img src="assets/app-screenshot.png" alt="Steam Video Exporter application window" width="960">
 </p>
 
-Standalone Windows GUI for losslessly remuxing Steam Game Recording footage into MP4, MOV, or FLV. It accepts a single recording directory or a Steam library root such as `D:\Videos\Steam`; library roots are grouped by each `bg_<appid>_<timestamp>` directory, so unrelated sessions are never concatenated.
+Losslessly remux Steam Game Recording footage into MP4, MOV, or FLV — no
+re-encoding, so quality and sync are identical to the original capture.
 
-The exporter reads Steam's `session.mpd` manifest when present. This preserves the original DASH video and audio streams with FFmpeg stream copy—no video or audio is re-rendered.
+Two Windows GUIs, pick whichever fits you:
 
-## What it does
+- **Steam Video Exporter** — English UI, manual: point it at an input folder
+  (a single recording or a whole library) and an output folder.
+- **Steam Quick Export** ("Steam 录制") — Chinese UI, automatic: finds your
+  whole Steam library and every game's recordings on its own, no folder or
+  AppID entry needed.
 
-- Resolves the Steam game name from local Steam metadata or Steam's app details service, instead of using the recording folder name.
-- Shows each recording in a checkable batch list, with Select all and Clear all actions.
-- Generates a first-frame preview for the selected recording.
-- Supports MP4, MOV, and FLV output, with 16 GB, 64 GB, or custom maximum segment sizes.
-- Supports custom output folders and filename tokens.
-- Runs preflight checks for source discovery, FFmpeg, output writability, and available disk space.
+> Looking for architecture, internals, or contributor notes instead? See
+> [CLAUDE.md](CLAUDE.md).
 
-## Run from source
+## Downloads
+
+Grab the latest build from [Releases](../../releases). Each app ships as two
+zips per version:
+
+- **`...-win-x64-ffmpeg.zip`** — includes FFmpeg/ffprobe, works out of the box.
+- **`...-win-x64.zip`** — smaller, for when you already have FFmpeg on `PATH`
+  or want to supply your own.
+
+## Steam Video Exporter (manual, English UI)
+
+Point it at a single recording folder or a library root such as
+`D:\Videos\Steam` and it groups recordings automatically so unrelated
+sessions are never mixed together.
+
+- Resolves the real game name (from Steam metadata, not the folder name).
+- Checkable batch list with Select all / Clear all, and a first-frame preview.
+- MP4, MOV, or FLV output, with 16 GB, 64 GB, or custom maximum segment sizes.
+- Custom output folder and filename tokens.
+- Preflight checks (source, FFmpeg, output folder, free disk space) before you convert.
+
+### Run from source
 
 1. Install Python 3.10+ and [uv](https://docs.astral.sh/uv/) on Windows.
-2. Put `ffmpeg.exe` (and preferably `ffprobe.exe`) beside `steam_video_exporter.py`, or add FFmpeg to `PATH`.
+2. Put `ffmpeg.exe` (and preferably `ffprobe.exe`) beside `steam_video_exporter.py`,
+   or add FFmpeg to `PATH`.
 3. Run with uv (the project environment is created automatically):
 
 ```powershell
 uv run python .\steam_video_exporter.py
 ```
 
-## TDD pre-commit hook
-
-The repository uses the version-controlled `.githooks/pre-commit` hook to run the unit-test suite before each commit. Enable it once per clone:
-
-```powershell
-git config core.hooksPath .githooks
-```
-
-The hook also enforces an 80% minimum coverage threshold for the testable conversion core (`steam_exporter.media` and `steam_exporter.models`). The Qt UI and thread wiring are covered separately through integration checks.
-
-## Package as a standalone EXE
-
-The included build script uses the uv-managed environment and does not call `pip`:
+### Package as a standalone EXE
 
 ```powershell
 .\build.ps1
 ```
 
-The build script resolves FFmpeg and FFprobe from the project folder or `PATH`, then copies both next to the EXE in `dist`. Keep all three files together when moving the standalone app.
+Keep the resulting `SteamVideoExporter.exe`, `ffmpeg.exe`, and `ffprobe.exe`
+(all in `dist\`) together when moving the app around.
 
-## Exporting a whole Steam library and deleting source fragments
+### Filename tokens
 
-For a large library with insufficient free space to duplicate everything at once, use the sequential migration script. It exports one recording at a time to `D:\Videos\Steam\exports`, verifies the resulting MP4 segments with FFprobe, then deletes only that recording's original `bg_*` source folder before starting the next one. Its default maximum segment size is 64 GB.
+Default pattern: `{game}_{date}_{time}_part{index}.{ext}`.
 
-> Warning: this permanently deletes the original Steam recording fragments after verification. Confirm that `D:\Videos\Steam\exports` is the intended destination before running it.
+Available tokens: `{game}`, `{source}`, `{date}` (`YYYY-MM-DD`), `{time}`
+(`HH-MM-SS`), `{index}` (`001`, `002`, ...), `{ext}`.
+
+## Steam Quick Export ("Steam 录制", automatic, Chinese UI)
+
+<p align="center">
+  <img src="assets/app-screenshot-quick.png" alt="Steam Quick Export application window" width="960">
+</p>
+
+Run `uv run python steam_quick_export.py`, or launch the packaged
+`SteamQuickExport.exe`. Click a game, check the recordings you want, click one
+for a first-frame preview, hit export. **Source recordings are never deleted
+by this app.** Output defaults to your Windows Videos folder under
+`exported/<game>/`.
+
+- Scans your whole library automatically and caches the result, so reopening
+  the app is fast; hold Shift while clicking Refresh to force a full rescan.
+- **Open Steam Recordings** opens Steam's own screenshot/recording manager so
+  you can delete captures through Steam; click Refresh afterward.
+- Exporting runs in the background, so the library stays browsable and you
+  can cancel an export at any time without closing the app.
+- Output is MP4 via stream copy, capped at 64 GB per file (larger recordings
+  are split automatically), and each export writes a `verification.json`
+  confirming durations and codecs matched the source.
+
+### Package as a standalone EXE
+
+```powershell
+.\build-quick.ps1
+```
+
+Keep the entire `dist-simple\SteamQuickExport\` folder together — it bundles
+Python, Qt, FFmpeg, and ffprobe.
+
+## Exporting a whole library and deleting source fragments
+
+For a large library with insufficient free space to duplicate everything at
+once, use the sequential migration script. It exports one recording at a time
+to `D:\Videos\Steam\exports`, verifies the resulting MP4 segments with FFprobe,
+then deletes only that recording's original source folder before starting the
+next one.
+
+> Warning: this permanently deletes the original Steam recording fragments
+> after verification. Confirm that `D:\Videos\Steam\exports` is the intended
+> destination before running it.
 
 ```powershell
 uv run python -m scripts.export_library_and_prune --delete-sources
 ```
 
-The script intentionally stops on any failed preflight, remux, or duration verification; it keeps the current source recording intact when that happens. Progress is written to `D:\Videos\Steam\exports\export-and-prune.log`.
-
-## Filename tokens
-
-The default pattern is `{game}_{date}_{time}_part{index}.{ext}`.
-
-Available tokens are `{game}`, `{source}`, `{date}` (`YYYY-MM-DD`), `{time}` (`HH-MM-SS`), `{index}` (`001`, `002`, ...), and `{ext}`.
-
-## Notes
-
-### Simple game exporter
-
-Run `uv run python steam_quick_export.py`, or launch the packaged
-`dist-simple/SteamQuickExport/SteamQuickExport.exe`. This separate, Chinese-language
-interface automatically lists games and their recordings. Click a game, select
-recordings using checkboxes, and click a recording for a first-frame preview.
-No AppID entry is needed. Output defaults to the Windows Videos folder under
-`exported/<game>/`; change locations using the location buttons. Sources are retained.
-
-Library scans use up to four worker processes, with parallel game-name lookups.
-Metadata is cached under `%LOCALAPPDATA%/SteamQuickExport/`. Refresh checks directory
-and manifest changes; unchanged sizes are reused for up to five minutes (export
-preflight still reads current source files). Game names are cached for seven days.
-Hold Shift while clicking Refresh to bypass the cache. Removed recordings disappear
-on refresh, and corrupt cache files are rebuilt automatically.
-
-The UI includes Open Steam Recordings, which opens Steam Settings so the user can
-manage Game Recording storage and delete recordings through Steam. Click Refresh
-after making changes; removed `bg_*` folders disappear from the app automatically.
-
-This interface uses MP4 stream copy and a strict decimal 64 GB limit
-(64,000,000,000 bytes). Oversized files are split at keyframes and checked again.
-Names include the recording timestamp and global `001_of_056` episode numbering.
-It checks disk space, output sizes, durations and stream codecs, and writes
-`verification.json`; this is not a full frame-by-frame decode test.
-Existing exports or pending work are not overwritten; another export uses a dated
-subfolder. Build with `./build-quick.ps1`, which isolates PATH to prevent unrelated
-ICU DLLs from being packaged with Qt.
-Keep the entire packaged application directory together; it contains Python, Qt,
-FFmpeg and ffprobe. The Videos-folder shortcut points to this directory.
-
-- Preflight checks the input folder, recording grouping, `.m4s` discovery, FFmpeg availability, output-folder writability, and free disk space.
-- After preflight, each recording folder appears as a checked item; clear individual items or use Select all/Clear all to choose a partial batch.
-- Select a recording and use Preview first frame to generate a temporary thumbnail through FFmpeg.
-- Conversion uses FFmpeg stream copy (`-c copy`) and never re-renders the video or audio. If the source codecs are not accepted by the requested container, the app reports the failure instead of silently re-encoding.
-- Conversion stages output files in a temporary subfolder and only moves completed segments into the selected output folder.
-- Segment size is treated as GiB-style GB (`1 GB = 1024^3 bytes`) and is checked after encoding. The app automatically retries with shorter segment durations when a segment is too large.
+It stops on any failed preflight, remux, or duration verification, leaving the
+current source recording intact. Progress is written to
+`D:\Videos\Steam\exports\export-and-prune.log`.

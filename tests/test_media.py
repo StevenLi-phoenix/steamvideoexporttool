@@ -22,11 +22,13 @@ from steam_exporter.media import (
     discover_m4s,
     discover_recordings,
     extract_first_frame,
+    extract_preview_frames,
     find_executable,
     format_bytes,
     recording_timestamp,
     render_filename,
     resolve_game_name,
+    resource_path,
     safe_name,
     unique_path,
 )
@@ -190,6 +192,52 @@ class ProcessHelperTests(unittest.TestCase):
                 with self.assertRaises(ConversionError):
                     extract_first_frame([], destination, Path('session.mpd'))
             self.assertFalse(destination.exists())
+
+    def test_extract_preview_frames_requires_ffmpeg_and_ffprobe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination_dir = Path(temporary) / 'previews'
+            with patch('steam_exporter.media.find_executable', return_value=None):
+                with self.assertRaises(ConversionError):
+                    extract_preview_frames([], destination_dir, Path('session.mpd'))
+
+    def test_extract_preview_frames_creates_four_thumbnails_at_even_offsets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination_dir = Path(temporary) / 'previews'
+            calls = []
+
+            def fake_run(command, **kwargs):
+                calls.append(command)
+                if command[0] == 'ffprobe.exe':
+                    return SimpleNamespace(stdout='40.0\n')
+                for index in range(1, 5):
+                    (destination_dir / f'frame_{index}.jpg').write_bytes(b'x')
+                return SimpleNamespace(returncode=0)
+
+            with patch('steam_exporter.media.find_executable', side_effect=lambda name, ffmpeg_path=None: Path(f'{name}.exe')), \
+                 patch('steam_exporter.media.subprocess.run', side_effect=fake_run):
+                outputs = extract_preview_frames([], destination_dir, Path('session.mpd'))
+            self.assertEqual(len(outputs), 4)
+            self.assertTrue(all(path.exists() for path in outputs))
+            offsets = [float(calls[1][index + 1]) for index, token in enumerate(calls[1]) if token == '-ss']
+            self.assertEqual(offsets, [0.0, 10.0, 20.0, 30.0])
+
+    def test_extract_preview_frames_raises_when_ffmpeg_produces_no_frames(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination_dir = Path(temporary) / 'previews'
+
+            def fake_run(command, **kwargs):
+                if command[0] == 'ffprobe.exe':
+                    return SimpleNamespace(stdout='10.0')
+                return SimpleNamespace(returncode=1)
+
+            with patch('steam_exporter.media.find_executable', side_effect=lambda name, ffmpeg_path=None: Path(f'{name}.exe')), \
+                 patch('steam_exporter.media.subprocess.run', side_effect=fake_run):
+                with self.assertRaises(ConversionError):
+                    extract_preview_frames([], destination_dir, Path('session.mpd'))
+
+    def test_resource_path_resolves_relative_to_project_root_when_not_frozen(self):
+        expected = Path(__file__).resolve().parent.parent / 'assets' / 'app-icon.ico'
+        self.assertEqual(resource_path('assets', 'app-icon.ico'), expected)
 
     def test_find_executable_prefers_bundled_sibling(self):
         with tempfile.TemporaryDirectory() as temporary:

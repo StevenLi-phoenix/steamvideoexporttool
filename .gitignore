@@ -9,5 +9,4 @@ dist/
 dist-*/
 *.spec
 .coverage
-assets/app-screenshot.png
 .steam-export-*/

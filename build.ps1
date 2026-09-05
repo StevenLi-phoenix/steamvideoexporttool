@@ -8,7 +8,7 @@ if (-not (Test-Path -LiteralPath $uvCommand)) {
     throw "uv was not found. Install it with winget or add it to PATH."
 }
 
-& $uvCommand run pyinstaller --noconfirm --clean --onefile --windowed --name SteamVideoExporter steam_video_exporter.py
+& $uvCommand run pyinstaller --noconfirm --clean --onefile --windowed --name SteamVideoExporter --icon assets\app-icon.ico steam_video_exporter.py
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $distRoot = Join-Path $projectRoot "dist"
@@ -32,6 +32,13 @@ foreach ($binary in @("ffmpeg.exe", "ffprobe.exe")) {
     if (Test-Path -LiteralPath $source) {
         Copy-Item -LiteralPath $source -Destination (Join-Path $distRoot $binary) -Force
     }
+}
+
+$iconSource = Join-Path $projectRoot "assets\app-icon.ico"
+if (Test-Path -LiteralPath $iconSource) {
+    $iconDestDir = Join-Path $distRoot "assets"
+    New-Item -ItemType Directory -Force -Path $iconDestDir | Out-Null
+    Copy-Item -LiteralPath $iconSource -Destination (Join-Path $iconDestDir "app-icon.ico") -Force
 }
 
 Write-Host "Built $distRoot\SteamVideoExporter.exe"

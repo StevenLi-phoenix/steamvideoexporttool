@@ -9,7 +9,9 @@ A Windows-only tool that losslessly remuxes Steam Game Recording `.m4s` DASH fra
 1. **Steam Video Exporter** (English UI) — entry point [steam_video_exporter.py](steam_video_exporter.py) → [steam_exporter/ui.py](steam_exporter/ui.py). Manual workflow: user points at an input folder (a single recording or a library root) and an output folder, runs preflight, picks recordings from a checklist, converts. Conversion runs in a `QThread` ([steam_exporter/worker.py](steam_exporter/worker.py)) inside the same process.
 2. **Steam Quick Export / "Steam 录制"** (Chinese UI) — entry point [steam_quick_export.py](steam_quick_export.py) → [steam_exporter/simple_ui.py](steam_exporter/simple_ui.py). Auto-discovers the Steam library, lists games and their recordings, no AppID entry needed. Conversion runs in a **spawned subprocess**, not a QThread — see Architecture below.
 
-Both apps share [steam_exporter/media.py](steam_exporter/media.py) (FFmpeg/FFprobe discovery, game-name resolution, `.m4s` discovery/grouping, first-frame preview, filename rendering, the `SteamExporter` service used by app 1) and [steam_exporter/models.py](steam_exporter/models.py) (`RecordingInput`, `PreflightResult`, `ConversionError`).
+Both apps share [steam_exporter/media.py](steam_exporter/media.py) (FFmpeg/FFprobe discovery, game-name resolution, `.m4s` discovery/grouping, first-frame preview, filename rendering, the `SteamExporter` service used by app 1) and [steam_exporter/models.py](steam_exporter/models.py) (`RecordingInput`, `PreflightResult` with an `.ok` property, `ConversionError`).
+
+Package metadata: `pyproject.toml` pins `PySide6>=6.7,<7`, requires Python `>=3.10`, and only declares one runtime dependency — everything else (PyInstaller, coverage) is a `uv` dependency group, never installed via `pip`.
 
 ## Commands
 
@@ -30,23 +32,26 @@ uv run --group test coverage report --fail-under=80
 uv run python -m unittest tests.test_media -v
 uv run python -m unittest tests.test_media.ConversionTests -v
 uv run python -m unittest tests.test_media.ConversionTests.test_convert_stream_copies_a_recording_into_the_output_folder -v
+uv run python -m unittest tests.test_library -v
 
 # Package the English exporter as a onefile EXE (copies ffmpeg/ffprobe into dist/)
 .\build.ps1
 
-# Package the Quick Export UI as a onedir EXE (isolates PATH to avoid stray Qt/ICU DLLs)
+# Package the Quick Export UI as a onedir EXE (isolates PATH, embeds ffmpeg/ffprobe from dist/)
 .\build-quick.ps1
 ```
 
-Both apps require `ffmpeg.exe` (and preferably `ffprobe.exe`) next to the script/EXE, on `PATH`, or via the `FFMPEG_PATH` env var — see `_ffmpeg_candidates()` in [steam_exporter/media.py](steam_exporter/media.py).
+Both apps require `ffmpeg.exe` (and preferably `ffprobe.exe`) next to the script/EXE, on `PATH`, or via the `FFMPEG_PATH` env var — see `_ffmpeg_candidates()` in [steam_exporter/media.py](steam_exporter/media.py). `build-quick.ps1` expects `dist\ffmpeg.exe`/`dist\ffprobe.exe` to already exist (run `build.ps1` first, or drop them there yourself) since it embeds them via `--add-binary` rather than resolving them itself.
+
+Packaged Quick Export builds support a smoke-test mode invoked as `SteamQuickExport.exe --self-test` (verifies bundled ffmpeg/ffprobe run, then exits without showing a real scan) and `--self-test --scan-self-test` (also forces one real `scan_library` pass) — see `main()` in [steam_exporter/simple_ui.py](steam_exporter/simple_ui.py).
 
 ### Coverage scope
 
-`pyproject.toml` restricts coverage to `steam_exporter` and omits `ui.py` and `worker.py` (Qt wiring, covered by manual/integration checks instead) with an 80% floor on the rest — mainly `media.py`, `models.py`, and `library.py`. New testable logic belongs in a plain module the coverage gate can see, not directly in a `QMainWindow`/`QThread`.
+`pyproject.toml` restricts coverage to `steam_exporter` and omits the Qt-facing/subprocess-wiring modules of both apps: App 1's `ui.py` and `worker.py`, and App 2's `simple_ui.py`, `export_client.py`, and `export_backend.py` (all covered by manual/integration checks instead — [scripts/check_export_ipc.py](scripts/check_export_ipc.py) for the export pipeline). The 80% floor applies to what's left — mainly `media.py`, `models.py`, and `library.py` — exercised by [tests/test_media.py](tests/test_media.py) and [tests/test_library.py](tests/test_library.py). New testable logic belongs in one of those plain modules the coverage gate can see, not directly in a `QMainWindow`/`QThread`/spawned-process entry point; if you do add real logic to an omitted module, add tests for it rather than relying on the omit to hide the gap.
 
 ### Pre-commit hook
 
-`.githooks/pre-commit` runs the full coverage-gated test suite before every commit. It's opt-in per clone:
+`.githooks/pre-commit` runs the full coverage-gated test suite before every commit (with `uv`/WinGet-uv/`.venv`/bare-`python` fallbacks, in that order). It's opt-in per clone:
 
 ```powershell
 git config core.hooksPath .githooks
@@ -71,11 +76,11 @@ CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs the same two comm
 
 This app is layered differently because conversion runs in a **separate spawned process**, not a thread, so a hung/crashed FFmpeg export can't take the GUI down and can be hard-killed:
 
-- [steam_exporter/library.py](steam_exporter/library.py) — `scan_library` discovers `bg_*` recordings per-game with a persistent JSON cache under `%LOCALAPPDATA%/SteamQuickExport/`. Directory `.m4s` sizes/mtimes are fingerprinted per-recording; a `ProcessPoolExecutor` (spawn context, capped workers) only re-inspects folders whose fingerprint changed. Game names are cached separately with a longer TTL (7 days, or 60s when resolution fell back to the raw folder name) and resolved concurrently via a `ThreadPoolExecutor`.
-- [steam_exporter/simple_ui.py](steam_exporter/simple_ui.py) — the Chinese GUI itself. Library scans and first-frame previews run on local `QThread`s (`Job`); the actual export does not.
-- [steam_exporter/export_client.py](steam_exporter/export_client.py) — `ExportClient`, a `QObject` that spawns the export as a `multiprocessing` (spawn context) `Process`, communicates over a one-way `Pipe`, and polls it with a `QTimer` (bounded per tick so a noisy backend can't starve the Qt event loop). Cancellation uses `taskkill /T /F` on the process tree, since the backend owns a live FFmpeg child.
-- [steam_exporter/export_backend.py](steam_exporter/export_backend.py) — the function run inside that subprocess (`run_export`). Must stay free of Qt imports since it runs in a plain spawned interpreter. It redirects output that already exists (or has a `.pending` staging dir) into a timestamped subfolder rather than overwriting, then delegates to `scripts/export_game.main`.
-- [scripts/export_game.py](scripts/export_game.py) — the actual export logic for this app: probes streams with ffprobe, remuxes each recording (`session.mpd`) to MP4 via stream copy into a `.pending` staging directory, and enforces a **strict decimal 64 GB cap** (`LIMIT = 64_000_000_000`, not GiB) by recursively bisecting oversized outputs at keyframe boundaries with `-f segment`. Verifies duration (within tolerance) and stream codec list match the source before accepting output, writes `verification.json`, and only then renames into the final output folder with `<game>_<timestamp>_<i>_of_<n>.mp4` naming. Source `.m4s` files are never deleted by this path.
+- [steam_exporter/library.py](steam_exporter/library.py) — `scan_library` discovers `bg_*` recordings per-game with a persistent JSON cache at `%LOCALAPPDATA%/SteamQuickExport/library-<sha256-of-resolved-path>.json` (`cache_path`). Each recording is fingerprinted by `inspect_folder`: total `.m4s` bytes, the mtime of every directory under it, and `session.mpd`'s `(mtime_ns, size)`; `valid()` reuses a cache entry only if all of those still match *and* the entry is under `CACHE_TTL` (300s) old — otherwise a `ProcessPoolExecutor` (spawn context, `min(workers, pending)` capped at 4 by default) re-inspects it. Game names live in a separate `names` map with a much longer TTL (7 days, or 60s if resolution fell back to the raw folder name) and are resolved concurrently via a `ThreadPoolExecutor`. The cache file is written atomically (temp file + `os.replace`) so a crash or overlapping instance never sees a half-written JSON. Passing `force=True` (Shift-click Refresh in the UI) bypasses cache validity but still writes results back into it.
+- [steam_exporter/simple_ui.py](steam_exporter/simple_ui.py) — the Chinese GUI itself (`SimpleApp`). Library scans and first-frame previews run on local `QThread`s (`Job`, a thin wrapper that calls `action(log_callback)` and emits `result`/`failed`); the actual export does not — it goes through `ExportClient`. `open_steam_recordings()` opens `steam://open/screenshots`, i.e. Steam's "View > Screenshots and Recordings" manager — **not** `steam://open/settings`, which is the wrong destination and was a bug fixed once already; don't regress it if this button is touched again.
+- [steam_exporter/export_client.py](steam_exporter/export_client.py) — `ExportClient`, a `QObject` that spawns the export as a `multiprocessing` (spawn context) `Process` running `export_backend.run_export`, communicates over a one-way `Pipe`, and polls it with a 100ms `QTimer` (bounded to 50 pipe reads per tick so a noisy backend can't starve the Qt event loop). Cancellation shells out to `taskkill /PID <pid> /T /F`, since the backend owns a live FFmpeg child that Python-level termination wouldn't reach.
+- [steam_exporter/export_backend.py](steam_exporter/export_backend.py) — `run_export(arguments, sender)`, the function run inside that subprocess. Must stay free of Qt imports since it runs in a plain spawned interpreter. Before delegating to `scripts/export_game.main`, it redirects the `--output` argument into a `export_%Y%m%d_%H%M%S_%f`-stamped subfolder if the target already has `.mp4` files or a `.pending` staging dir, so a rerun never overwrites a previous export. Reports progress as `("log", str)` messages over the pipe, then a terminal `("done", output_path)` or `("error", "ExcType: message")`.
+- [scripts/export_game.py](scripts/export_game.py) — the actual export logic for this app, invoked as a CLI (`--source`, `--output`, `--appid`, `--game`, repeatable `--recording`). Probes every `session.mpd` with ffprobe first and rejects anything without a video stream; checks `shutil.disk_usage(output).free >= total_source_bytes * 1.15 + LIMIT` before starting. Remuxes each recording via stream copy into a `.pending` staging directory (refuses to run if `.pending` already exists — "must be inspected before another run"); enforces a **strict decimal 64 GB cap** (`LIMIT = 64_000_000_000`, not GiB) by recursively bisecting any output at or above the cap in half at keyframe boundaries with `-f segment -segment_time <duration/2>`, giving up if a candidate segment would need to be under 1 second. After splitting, verifies total duration against the source (tolerance `max(2, parts * 0.5)` seconds) and that every part's `(codec_type, codec_name)` stream list exactly matches the source before accepting it. Only then renames parts out of staging into `<game>_<timestamp>_<i>_of_<n>.mp4` and writes a `verification.json` array of `{file, bytes, source, duration, stream_copy: true}` per output. Source `.m4s` files are never touched by this path.
 
 ### Standalone migration script
 
@@ -91,3 +96,4 @@ This app is layered differently because conversion runs in a **separate spawned 
 - Both GUIs use `subprocess.CREATE_NO_WINDOW` on all FFmpeg/ffprobe calls to avoid flashing console windows.
 - Filenames and folder names are sanitized with `safe_name()` (strips Windows-invalid characters) everywhere a game name or pattern is turned into a path component.
 - The two apps intentionally use different segment-size conventions: App 1's GB radio buttons are binary (`1 GB = 1024**3`), App 2's cap is a strict decimal 64,000,000,000 bytes. Don't assume they're interchangeable when touching size-limit logic.
+- Steam's `steam://` URI scheme is easy to get subtly wrong — `steam://open/settings` opens general Settings, not the recordings manager; the correct target for "let the user delete recordings" is `steam://open/screenshots`.
