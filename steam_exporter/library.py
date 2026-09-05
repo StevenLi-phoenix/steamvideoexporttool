@@ -4,16 +4,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import tempfile
 import time
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from multiprocessing import get_context
 from pathlib import Path
 
-from .media import resolve_game_name
+from .media import RECORDING_DIR_APPID, resolve_game_name
 
-RECORDING = re.compile(r"bg_(\d+)_\d{8}_\d{6}$")
 CACHE_TTL = 300  # Also recheck in-place edits that do not change directory timestamps.
 
 
@@ -73,7 +71,7 @@ def scan_library(source, log=lambda _: None, *, force=False, cache_file=None, wo
     now = time.time()
     folders = []
     for folder in sorted(source.glob("bg_*")):
-        match = RECORDING.fullmatch(folder.name)
+        match = RECORDING_DIR_APPID.fullmatch(folder.name)
         if match and (folder / "session.mpd").is_file():
             folders.append((folder, match[1]))
     records, pending = {}, []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime
@@ -72,6 +73,12 @@ class SteamMetadataTests(unittest.TestCase):
         self.assertIsNone(_parse_appid('no-app-id-here'))
         self.assertEqual(_parse_steam_name('"AppState" { "name" "Portal 2" }'), 'Portal 2')
 
+    def test_parse_steam_name_unescapes_valve_strings_without_corrupting_utf8(self):
+        self.assertEqual(_parse_steam_name('"name" "反恐精英2"'), '反恐精英2')
+        self.assertEqual(_parse_steam_name(r'"name" "Counter\"Strike"'), 'Counter"Strike')
+        self.assertEqual(_parse_steam_name(r'"name" "Left 4\\Dead 2\n"'), 'Left 4\\Dead 2\n')
+        self.assertIsNone(_parse_steam_name('no name here'))
+
     def test_local_json_game_name_takes_priority_without_network(self):
         with tempfile.TemporaryDirectory() as temporary:
             recording = Path(temporary) / 'bg_620_20260725_104500'
@@ -118,7 +125,8 @@ class SteamMetadataTests(unittest.TestCase):
             steam = root / 'Steam'
             (steam / 'steamapps').mkdir(parents=True)
             library = Path(temporary) / 'Library'
-            (steam / 'steamapps' / 'libraryfolders.vdf').write_text(f'"path" "{library}"', encoding='utf-8')
+            escaped = str(library).replace('\\', '\\\\')
+            (steam / 'steamapps' / 'libraryfolders.vdf').write_text(f'"path" "{escaped}"', encoding='utf-8')
             environment = {'PROGRAMFILES(X86)': str(root), 'PROGRAMFILES': '', 'LOCALAPPDATA': ''}
             with patch.dict('steam_exporter.media.os.environ', environment, clear=True):
                 roots = _steam_roots()
@@ -228,12 +236,45 @@ class ProcessHelperTests(unittest.TestCase):
             def fake_run(command, **kwargs):
                 if command[0] == 'ffprobe.exe':
                     return SimpleNamespace(stdout='10.0')
-                return SimpleNamespace(returncode=1)
+                return SimpleNamespace(returncode=1, stderr='Invalid data found')
 
             with patch('steam_exporter.media.find_executable', side_effect=lambda name, ffmpeg_path=None: Path(f'{name}.exe')), \
                  patch('steam_exporter.media.subprocess.run', side_effect=fake_run):
-                with self.assertRaises(ConversionError):
+                with self.assertRaises(ConversionError) as raised:
                     extract_preview_frames([], destination_dir, Path('session.mpd'))
+            self.assertIn('Invalid data found', str(raised.exception))
+
+    def test_extract_preview_frames_surfaces_stderr_when_duration_is_unreadable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination_dir = Path(temporary) / 'previews'
+            destination_dir.mkdir()
+            (destination_dir / 'frame_1.jpg').write_bytes(b'stale')
+
+            def fake_run(command, **kwargs):
+                return SimpleNamespace(stdout='N/A', stderr='moov atom not found', returncode=1)
+
+            with patch('steam_exporter.media.find_executable', side_effect=lambda name, ffmpeg_path=None: Path(f'{name}.exe')), \
+                 patch('steam_exporter.media.subprocess.run', side_effect=fake_run):
+                with self.assertRaises(ConversionError) as raised:
+                    extract_preview_frames([], destination_dir, Path('session.mpd'))
+            self.assertIn('moov atom not found', str(raised.exception))
+            self.assertFalse((destination_dir / 'frame_1.jpg').exists())
+
+    def test_extract_preview_frames_reports_timeouts_and_cleans_partial_frames(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            destination_dir = Path(temporary) / 'previews'
+
+            def fake_run(command, **kwargs):
+                if command[0] == 'ffprobe.exe':
+                    return SimpleNamespace(stdout='40.0')
+                raise subprocess.TimeoutExpired(cmd='ffmpeg', timeout=120)
+
+            with patch('steam_exporter.media.find_executable', side_effect=lambda name, ffmpeg_path=None: Path(f'{name}.exe')), \
+                 patch('steam_exporter.media.subprocess.run', side_effect=fake_run):
+                with self.assertRaises(ConversionError) as raised:
+                    extract_preview_frames([], destination_dir, Path('session.mpd'))
+            self.assertIn('timed out', str(raised.exception))
+            self.assertFalse(any(destination_dir.glob('frame_*.jpg')))
 
     def test_resource_path_resolves_relative_to_project_root_when_not_frozen(self):
         expected = Path(__file__).resolve().parent.parent / 'assets' / 'app-icon.ico'

@@ -18,6 +18,9 @@ from .models import ConversionError, PreflightResult, RecordingInput
 
 DEFAULT_PATTERN = "{game}_{date}_{time}_part{index}.{ext}"
 _GAME_NAME_CACHE: dict[str, str | None] = {}
+RECORDING_DIR_NAME = re.compile(r"^bg_\d+_\d{8}_\d{6}$", re.IGNORECASE)
+RECORDING_DIR_APPID = re.compile(r"^bg_(\d+)_\d{8}_\d{6}$", re.IGNORECASE)
+PROBE_TIMEOUT_SECONDS = 120
 
 
 def format_bytes(value: int | float) -> str:
@@ -27,7 +30,7 @@ def format_bytes(value: int | float) -> str:
         if amount < 1024 or unit == units[-1]:
             return f"{amount:.1f} {unit}" if unit != "B" else f"{int(amount)} B"
         amount /= 1024
-    return f"{amount:.1f} TB"
+    raise AssertionError("unreachable")
 
 
 def safe_name(value: str, fallback: str = "SteamRecording") -> str:
@@ -77,11 +80,30 @@ def _parse_appid(text: str) -> str | None:
     return matches[0] if matches else None
 
 
+_VDF_ESCAPES = {"\\\\": "\\", '\\"': '"', "\\n": "\n", "\\r": "\r", "\\t": "\t"}
+
+
+def _unescape_vdf(value: str) -> str:
+    """Resolve Valve's string escapes directly. unicode_escape would mangle
+    multi-byte UTF-8 characters such as Chinese game names."""
+    out: list[str] = []
+    index = 0
+    while index < len(value):
+        pair = value[index:index + 2]
+        if pair in _VDF_ESCAPES:
+            out.append(_VDF_ESCAPES[pair])
+            index += 2
+        else:
+            out.append(value[index])
+            index += 1
+    return "".join(out)
+
+
 def _parse_steam_name(text: str) -> str | None:
     match = re.search(r'"name"\s+"((?:[^"\\]|\\.)*)"', text, re.IGNORECASE)
     if not match:
         return None
-    return bytes(match.group(1), "utf-8").decode("unicode_escape", errors="ignore")
+    return _unescape_vdf(match.group(1))
 
 
 def _fetch_steam_game_name(appid: str) -> str | None:
@@ -112,14 +134,21 @@ def _steam_roots() -> list[Path]:
         except OSError:
             continue
         for value in re.findall(r'"path"\s+"((?:[^"\\]|\\.)*)"', text, re.IGNORECASE):
-            libraries.append(Path(value.replace("\\\\", "\\")))
+            libraries.append(Path(_unescape_vdf(value)))
     return list(dict.fromkeys(libraries))
 
 
+def _metadata_json_files(folder: Path) -> list[Path]:
+    """*.json and *.JSON collapse to the same files on Windows; dedupe by casefold."""
+    found = {str(path).casefold(): path for path in folder.glob("*.json")}
+    found.update({str(path).casefold(): path for path in folder.glob("*.JSON")})
+    return sorted(found.values(), key=lambda path: path.name.lower())
+
+
 def resolve_game_name(source: Path) -> str:
-    metadata_files = list(source.glob("*.json")) + list(source.glob("*.JSON"))
+    metadata_files = _metadata_json_files(source)
     if source.parent != source:
-        metadata_files += list(source.parent.glob("*.json")) + list(source.parent.glob("*.JSON"))
+        metadata_files += _metadata_json_files(source.parent)
     for metadata in metadata_files[:50]:
         try:
             data = json.loads(metadata.read_text(encoding="utf-8-sig"))
@@ -174,9 +203,8 @@ def discover_m4s(source: Path) -> list[Path]:
 def discover_recordings(source: Path) -> list[tuple[Path, list[Path]]]:
     """Group chunks by Steam's bg_<appid>_<timestamp> recording directory."""
     groups: dict[Path, list[Path]] = {}
-    recording_name = re.compile(r"^bg_\d+_\d{8}_\d{6}$", re.IGNORECASE)
     for path in discover_m4s(source):
-        folder = next((parent for parent in (path.parent, *path.parents) if recording_name.match(parent.name)), path.parent)
+        folder = next((parent for parent in (path.parent, *path.parents) if RECORDING_DIR_NAME.match(parent.name)), path.parent)
         groups.setdefault(folder, []).append(path)
     return sorted(
         ((folder, sorted(files, key=lambda path: path.name.lower())) for folder, files in groups.items()),
@@ -192,7 +220,6 @@ def recording_timestamp(folder: Path) -> datetime:
         except ValueError:
             pass
     return datetime.now()
-
 
 def _escape_concat_path(path: Path) -> str:
     return str(path.resolve()).replace("'", "'\\''")
@@ -219,7 +246,8 @@ def extract_first_frame(files: list[Path], destination: Path, manifest: Path | N
         else:
             command.extend(["-f", "concat", "-safe", "0", "-i", str(concat_list)])
         command.extend(["-frames:v", "1", "-vf", "scale=640:-2", "-q:v", "4", str(destination)])
-        result = subprocess.run(command, capture_output=True, text=True,
+        result = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace",
+                                timeout=PROBE_TIMEOUT_SECONDS,
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         if result.returncode != 0 or not destination.exists():
             raise ConversionError("FFmpeg could not create a preview for this recording.")
@@ -230,6 +258,11 @@ def extract_first_frame(files: list[Path], destination: Path, manifest: Path | N
     finally:
         if concat_list:
             concat_list.unlink(missing_ok=True)
+
+
+def _clear_preview_frames(destination_dir: Path) -> None:
+    for index in range(1, 5):
+        (destination_dir / f"frame_{index}.jpg").unlink(missing_ok=True)
 
 
 def extract_preview_frames(files: list[Path], destination_dir: Path, manifest: Path | None = None) -> list[Path]:
@@ -247,9 +280,14 @@ def extract_preview_frames(files: list[Path], destination_dir: Path, manifest: P
         else:
             probe += ["-f", "concat", "-safe", "0", "-i", str(concat_list)]
         probe += ["-show_entries", "format=duration", "-of", "default=nk=1:nw=1"]
-        result = subprocess.run(probe, capture_output=True, text=True,
+        result = subprocess.run(probe, capture_output=True, encoding="utf-8", errors="replace",
+                                timeout=PROBE_TIMEOUT_SECONDS,
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
-        duration = max(0.0, float(result.stdout.strip()))
+        try:
+            duration = max(0.0, float(result.stdout.strip()))
+        except ValueError:
+            detail = (result.stderr or "").strip()[-400:]
+            raise ConversionError("ffprobe could not read the recording duration." + (f" {detail}" if detail else "")) from None
         # One FFmpeg process with four independent fast seeks. It avoids decoding
         # the whole recording while still keeping preview generation to one call.
         command = [str(ffmpeg), "-hide_banner", "-loglevel", "error", "-y"]
@@ -262,15 +300,23 @@ def extract_preview_frames(files: list[Path], destination_dir: Path, manifest: P
         for index in range(4):
             command += ["-map", f"{index}:v:0", "-frames:v", "1", "-vf", "scale=320:-2",
                         "-q:v", "5", str(destination_dir / f"frame_{index + 1}.jpg")]
-        created = subprocess.run(command, capture_output=True, text=True,
-                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        try:
+            created = subprocess.run(command, capture_output=True, encoding="utf-8", errors="replace",
+                                     timeout=PROBE_TIMEOUT_SECONDS,
+                                     creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        except subprocess.TimeoutExpired:
+            raise ConversionError("FFmpeg timed out while generating the preview.") from None
         outputs = [destination_dir / f"frame_{index}.jpg" for index in range(1, 5)
                    if (destination_dir / f"frame_{index}.jpg").exists()]
         if created.returncode != 0:
             outputs = []
         if not outputs:
-            raise ConversionError("FFmpeg could not create preview frames.")
+            detail = (created.stderr or "").strip()[-400:]
+            raise ConversionError("FFmpeg could not create preview frames." + (f" {detail}" if detail else ""))
         return outputs
+    except BaseException:
+        _clear_preview_frames(destination_dir)
+        raise
     finally:
         if concat_list:
             concat_list.unlink(missing_ok=True)
@@ -287,7 +333,8 @@ def _read_duration(ffprobe: Path | None, concat_list: Path | None = None, manife
     command.extend(["-show_entries", "format=duration", "-of", "default=nk=1:nw=1"])
     result = subprocess.run(
         command,
-        capture_output=True, text=True,
+        capture_output=True, encoding="utf-8", errors="replace",
+        timeout=PROBE_TIMEOUT_SECONDS,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     try:

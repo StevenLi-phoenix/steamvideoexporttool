@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from steam_exporter.media import find_executable, recording_timestamp, safe_name
+from steam_exporter.media import find_executable, recording_timestamp, safe_name, unique_path
 
 LIMIT = 64_000_000_000
 
@@ -44,8 +44,10 @@ def main(argv=None, log=print):
     def probe(path):
         result = subprocess.run([str(ffprobe), "-v", "error", "-show_format", "-show_streams",
                                  "-of", "json", str(path)], capture_output=True, encoding="utf-8",
-                                errors="replace", timeout=120, check=True,
+                                errors="replace", timeout=120, check=False,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if result.returncode:
+            raise RuntimeError(f"ffprobe failed on {path}: {result.stderr[-2000:]}")
         data = json.loads(result.stdout)
         if not any(s["codec_type"] == "video" for s in data["streams"]):
             raise RuntimeError(f"Missing video: {path}")
@@ -104,7 +106,7 @@ def main(argv=None, log=print):
         stamp = recording_timestamp(folder).strftime("%Y-%m-%d_%H-%M-%S")
         dest = args.output / f"{safe_name(args.game)}_{stamp}_{index:03d}_of_{len(entries):03d}.mp4"
         if dest.exists():
-            raise RuntimeError(f"Destination already exists: {dest}")
+            dest = unique_path(dest)
         size = part.stat().st_size
         if not 0 < size < LIMIT:
             raise RuntimeError("Output violates strict size cap")
