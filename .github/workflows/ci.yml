@@ -37,8 +37,9 @@ jobs:
           Invoke-WebRequest -Uri "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" -OutFile $archive
           Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot
           $bin = (Get-ChildItem $extractRoot -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
-          Copy-Item (Join-Path $bin "ffmpeg.exe") .\ffmpeg.exe
-          Copy-Item (Join-Path $bin "ffprobe.exe") .\ffprobe.exe
+          New-Item -ItemType Directory -Force -Path .\dist | Out-Null
+          Copy-Item (Join-Path $bin "ffmpeg.exe") .\dist\ffmpeg.exe
+          Copy-Item (Join-Path $bin "ffprobe.exe") .\dist\ffprobe.exe
       - name: Build Steam Quick Export
         run: powershell -ExecutionPolicy Bypass -File .\build-quick.ps1
       - name: Smoke-test Steam Quick Export bundle
