@@ -10,6 +10,8 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from .platform_paths import steam_installation_roots
+
 
 class ConversionError(RuntimeError):
     """A user-facing conversion, preview, or validation failure."""
@@ -37,9 +39,12 @@ def safe_name(value: str, fallback: str = "SteamRecording") -> str:
 
 
 def resource_path(*parts: str) -> Path:
-    """Locate a bundled resource (e.g. the app icon): next to the running exe
-    when frozen, or under the project root when running from source."""
-    app_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
+    """Locate resources in PyInstaller's bundle root or the source project."""
+    app_dir = (
+        Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent))
+        if getattr(sys, "frozen", False)
+        else Path(__file__).resolve().parent.parent
+    )
     return app_dir.joinpath(*parts)
 
 
@@ -49,17 +54,26 @@ def _ffmpeg_candidates() -> list[Path]:
     if configured:
         candidates.append(Path(configured))
     app_dir = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent.parent
-    candidates.extend((app_dir / "ffmpeg.exe", app_dir / "bin" / "ffmpeg.exe"))
+    binary = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    for directory in dict.fromkeys((app_dir, resource_path())):
+        candidates.extend((directory / binary, directory / "bin" / binary))
+    if sys.platform == "darwin":
+        # The full Homebrew formula includes the DASH demuxer Steam needs;
+        # it is keg-only, so it does not replace a minimal ffmpeg on PATH.
+        candidates.extend((Path("/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg"), Path("/usr/local/opt/ffmpeg-full/bin/ffmpeg")))
     found = shutil.which("ffmpeg")
     if found:
         candidates.append(Path(found))
+    if sys.platform == "darwin":
+        # Finder does not inherit the shell's Homebrew PATH.
+        candidates.extend((Path("/opt/homebrew/bin/ffmpeg"), Path("/usr/local/bin/ffmpeg")))
     return candidates
 
 
 def find_executable(name: str, ffmpeg_path: Path | None = None) -> Path | None:
     if name == "ffmpeg":
         for candidate in _ffmpeg_candidates():
-            if candidate.exists():
+            if candidate.is_file():
                 return candidate
         return None
     if ffmpeg_path:
@@ -132,10 +146,7 @@ def _steam_roots() -> list[Path]:
     global _STEAM_ROOTS_CACHE
     if _STEAM_ROOTS_CACHE is not None:
         return _STEAM_ROOTS_CACHE
-    roots: list[Path] = []
-    for base in (os.environ.get("PROGRAMFILES(X86)"), os.environ.get("PROGRAMFILES"), os.environ.get("LOCALAPPDATA")):
-        if base:
-            roots.append(Path(base) / "Steam")
+    roots = steam_installation_roots()
     libraries = list(roots)
     for root in list(roots):
         library_file = root / "steamapps" / "libraryfolders.vdf"

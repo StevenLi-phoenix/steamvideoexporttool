@@ -11,7 +11,9 @@ import os
 import tempfile
 from pathlib import Path
 
-SETTINGS_DIR = Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "SteamQuickExport"
+from .platform_paths import settings_dir
+
+SETTINGS_DIR = settings_dir()
 SETTINGS_FILE = SETTINGS_DIR / "settings.json"
 
 

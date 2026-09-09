@@ -105,7 +105,7 @@ class SteamMetadataTests(unittest.TestCase):
             escaped = str(library).replace("\\", "\\\\")
             (steam / "steamapps" / "libraryfolders.vdf").write_text(f'"path" "{escaped}"', encoding="utf-8")
             environment = {"PROGRAMFILES(X86)": str(root), "PROGRAMFILES": "", "LOCALAPPDATA": ""}
-            with patch.object(media_module, "_STEAM_ROOTS_CACHE", None):  # reset the per-process cache
+            with patch.object(media_module, "_STEAM_ROOTS_CACHE", None), patch("sys.platform", "win32"):
                 with patch.dict("steam_exporter.media.os.environ", environment, clear=True):
                     roots = _steam_roots()
             self.assertEqual(roots, [steam, library])

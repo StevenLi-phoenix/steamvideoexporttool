@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
 import tempfile
 import traceback
 import webbrowser
-import winreg
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt, QThread, QTimer, QUrl, Signal
@@ -38,18 +36,11 @@ from .export_client import ExportClient
 from .i18n import current_language, normalize_language, set_language, tr
 from .library import scan_library
 from .media import extract_preview_frames, find_executable, format_bytes, recording_timestamp, resource_path, safe_name
+from .platform_paths import default_recordings_path, videos_path
 from .settings import load_settings, update_settings
 from .taskqueue import ExportTask, TaskQueue
 
 _PROGRESS = re.compile(r"^\[(\d+)/(\d+)\]")
-
-
-def videos_path():
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders") as key:
-            return Path(os.path.expandvars(winreg.QueryValueEx(key, "My Video")[0]))
-    except OSError:
-        return Path.home() / "Videos"
 
 
 class Job(QThread):
@@ -75,7 +66,7 @@ class SimpleApp(QMainWindow):
         super().__init__()
         self.setMinimumSize(820, 620)
         saved = load_settings()
-        self.source = Path(saved["source"]) if saved.get("source") else videos_path() / "Steam" / "video"
+        self.source = Path(saved["source"]) if saved.get("source") else default_recordings_path()
         self.output = Path(saved["output"]) if saved.get("output") else videos_path() / "exported"
         self.job = self.preview_job = None
         self.close_after_cancel = False
@@ -628,7 +619,11 @@ def main():
             if not binary:
                 raise RuntimeError(f"Missing bundled {name}")
             subprocess.run(
-                [str(binary), "-version"], check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW, timeout=20
+                [str(binary), "-version"],
+                check=True,
+                capture_output=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                timeout=20,
             )
         if "--scan-self-test" in sys.argv:
             scan_library(window.source, force=True)

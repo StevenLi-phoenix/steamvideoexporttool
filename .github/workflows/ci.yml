@@ -15,7 +15,10 @@ permissions:
 
 jobs:
   test:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -41,3 +44,53 @@ jobs:
         with:
           name: SteamQuickExport-${{ github.sha }}
           path: dist-simple\SteamQuickExport\
+
+  build-macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install FFmpeg
+        run: brew install ffmpeg-full
+      - name: Build macOS app
+        run: bash build-macos.sh
+      - name: Verify DASH remux and previews
+        shell: bash
+        run: |
+          set -euo pipefail
+          fixture="$RUNNER_TEMP/steam-fixture/video/bg_620_20260908_120000"
+          mkdir -p "$fixture"
+          "$(brew --prefix ffmpeg-full)/bin/ffmpeg" -hide_banner -loglevel error \
+            -f lavfi -i testsrc2=size=320x180:rate=24 \
+            -f lavfi -i sine=frequency=440:sample_rate=48000 \
+            -t 4 -c:v libx264 -g 24 -pix_fmt yuv420p -c:a aac \
+            -f dash -seg_duration 1 "$fixture/session.mpd"
+          uv run python - "$fixture" <<'PY'
+          import sys
+          import tempfile
+          from pathlib import Path
+          from scripts.export_game import process_recording
+          from steam_exporter.media import extract_preview_frames, find_executable
+
+          source = Path(sys.argv[1])
+          ffmpeg = find_executable("ffmpeg")
+          ffprobe = find_executable("ffprobe", ffmpeg)
+          with tempfile.TemporaryDirectory() as temp:
+              parts = process_recording(source, Path(temp), ffmpeg, ffprobe, limit=1_000_000)
+              assert len(parts) == 1 and parts[0][0].stat().st_size > 0
+              frames = extract_preview_frames([], Path(temp) / "preview", source / "session.mpd")
+              assert len(frames) == 4
+          assert (source / "session.mpd").is_file()
+          PY
+      - name: Smoke-test macOS bundle with Finder-style PATH
+        run: |
+          PATH=/usr/bin:/bin:/usr/sbin:/sbin dist-macos/SteamQuickExport.app/Contents/MacOS/SteamQuickExport --self-test --scan-self-test
+      - name: Archive macOS app
+        run: ditto -c -k --sequesterRsrc --keepParent dist-macos/SteamQuickExport.app SteamQuickExport-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SteamQuickExport-macos-${{ runner.arch }}-${{ github.sha }}
+          path: SteamQuickExport-macos.zip

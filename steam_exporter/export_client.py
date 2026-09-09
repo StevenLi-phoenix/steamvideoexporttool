@@ -1,6 +1,10 @@
 """Nonblocking Qt adapter for the separate export process."""
 
+import logging
+import os
+import signal
 import subprocess
+import sys
 from multiprocessing import get_context
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -22,6 +26,8 @@ class ExportClient(QObject):
         self.receiver = None
         self.outcome = None
         self.cancel_requested = False
+        self.backend_ready = False
+        self.cancel_sent = False
         self.timer = QTimer(self)
         self.timer.setInterval(100)
         self.timer.timeout.connect(self.poll)
@@ -34,6 +40,8 @@ class ExportClient(QObject):
         self.receiver, sender = context.Pipe(duplex=False)
         self.outcome = None
         self.cancel_requested = False
+        self.backend_ready = False
+        self.cancel_sent = False
         self.process = context.Process(target=run_export, args=(list(arguments), sender))
         try:
             self.process.start()
@@ -46,14 +54,26 @@ class ExportClient(QObject):
             sender.close()
         self.timer.start()
 
-    def cancel(self):
-        if not self.process or not self.isRunning():
+    def cancel(self) -> None:
+        if not self.process or not self.isRunning() or self.cancel_sent:
             return
         self.cancel_requested = True
-        # The backend owns FFmpeg; terminate the whole Windows process tree.
-        subprocess.run(
-            ["taskkill", "/PID", str(self.process.pid), "/T", "/F"], capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW
-        )
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/PID", str(self.process.pid), "/T", "/F"],
+                capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            self.cancel_sent = True
+        elif self.backend_ready:
+            # Wait for the ready message before signalling: cancellation may be
+            # requested while spawn is still importing, before setsid runs.
+            try:
+                os.killpg(self.process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # The worker already exited.
+            self.cancel_sent = True
+        logging.getLogger(__name__).info("Export cancellation requested for worker %s", self.process.pid)
 
     def poll(self):
         # Bound event processing so even a noisy backend cannot monopolize Qt.
@@ -65,7 +85,11 @@ class ExportClient(QObject):
                     kind, payload = self.receiver.recv()
                 except (EOFError, OSError):
                     break
-                if kind == "log":
+                if kind == "ready":
+                    self.backend_ready = True
+                    if self.cancel_requested:
+                        self.cancel()
+                elif kind == "log":
                     self.message.emit(payload)
                 elif kind == "progress":
                     self.progress.emit(float(payload))

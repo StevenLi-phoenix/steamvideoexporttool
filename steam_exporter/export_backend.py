@@ -1,5 +1,7 @@
 """Spawned export worker. No Qt imports or UI callbacks in this process."""
 
+import os
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +12,10 @@ from .i18n import tr
 
 def run_export(arguments, sender):
     try:
+        if sys.platform != "win32":
+            # Isolate the worker and its FFmpeg children from the GUI's group.
+            os.setsid()
+        sender.send(("ready", None))
         arguments = list(arguments)
         index = arguments.index("--output") + 1
         output = Path(arguments[index])

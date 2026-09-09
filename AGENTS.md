@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Windows-only desktop tool (PySide6 + FFmpeg stream copy) that losslessly remuxes
+Windows and macOS desktop tool (PySide6 + FFmpeg stream copy) that losslessly remuxes
 Steam Game Recording M4S/DASH sessions into MP4. All Python commands go through
 **uv** — never use pip directly.
 
@@ -17,7 +17,12 @@ uv run --group lint ruff format .
 uv run python steam_quick_export.py --self-test --scan-self-test   # smoke test
 ```
 
-CI (`.github/workflows/ci.yml`) runs tests + ruff + build on windows-latest.
+CI (`.github/workflows/ci.yml`) runs tests + ruff on Windows and macOS, plus native builds.
+On macOS, use `bash build-macos.sh` to build `dist-macos/SteamQuickExport.app`.
+The Mac app needs separately installed FFmpeg (`brew install ffmpeg-full`). Its smoke test is
+`dist-macos/SteamQuickExport.app/Contents/MacOS/SteamQuickExport --self-test --scan-self-test`.
+For cloud-synced checkouts, set `MACOS_DIST_DIR=/tmp/steamquickexport-dist` when building;
+the filesystem can reattach Finder metadata and make codesign reject a bundle in Documents.
 Enable the pre-commit hook with `git config core.hooksPath .githooks` (it runs
 ruff + the full suite, so commits take a minute).
 
@@ -33,6 +38,16 @@ ruff + the full suite, so commits take a minute).
 - `steam_exporter/media.py`: FFmpeg discovery, Steam library roots, game-name
   resolution, previews, shared helpers (`safe_name`, `recording_timestamp`,
   `unique_path`, `ConversionError`). `steam_exporter/library.py`: cached library scan.
+- `steam_exporter/platform_paths.py`: guarded Windows registry access, macOS Movies
+  and Application Support paths, Steam account recording-folder discovery. Saved
+  folder choices override discovery; custom Steam recording locations remain selectable.
+- The export worker calls `setsid()` on macOS before sending the `ready` IPC event.
+  Cancellation waits for this event, then kills the worker's process group (including
+  FFmpeg); Windows retains `taskkill /T /F`. Do not signal the GUI's process group.
+- Frozen resources use `_MEIPASS`; Mac FFmpeg lookup also checks Homebrew locations
+  because Finder does not inherit a terminal's PATH. Prefer the keg-only `ffmpeg-full`
+  binary over PATH: the minimal Homebrew formula can lack DASH demuxing. Test with
+  an actual `session.mpd`, not just `ffmpeg -version`.
 - **Destructive script**: `scripts/export_library_and_prune.py` deletes source
   recordings. Treat changes as high risk: keep the `--delete-sources` gate,
   per-recording verify-then-delete order, and the `video_root.resolve()` boundary check.

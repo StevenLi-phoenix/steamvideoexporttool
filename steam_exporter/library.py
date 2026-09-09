@@ -13,6 +13,7 @@ from multiprocessing import get_context
 from pathlib import Path
 
 from .media import RECORDING_DIR_APPID, resolve_game_name
+from .platform_paths import settings_dir
 
 CACHE_TTL = 300  # Also recheck in-place edits that do not change directory timestamps.
 FALLBACK_NAME_TTL = 3600  # Retry folder-name fallbacks (e.g. offline) after an hour.
@@ -20,7 +21,7 @@ FALLBACK_NAME_TTL = 3600  # Retry folder-name fallbacks (e.g. offline) after an 
 
 def cache_path(source: Path | str) -> Path:
     key = hashlib.sha256(str(Path(source).resolve()).casefold().encode()).hexdigest()[:24]
-    return Path(os.environ.get("LOCALAPPDATA", str(Path.home()))) / "SteamQuickExport" / f"library-{key}.json"
+    return settings_dir() / f"library-{key}.json"
 
 
 def read_cache(path: Path | str) -> dict:
